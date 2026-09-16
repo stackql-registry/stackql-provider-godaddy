@@ -59,7 +59,7 @@ fi
 
 # If registry path not specified, use current directory
 if [ -z "$REG_PATH" ]; then
-  REG_PATH="$BASE_DIR/provider-dev/openapi/src"
+  REG_PATH="$BASE_DIR/provider-dev/openapi"
 fi
 
 echo "Using provider: $PROVIDER"
@@ -67,22 +67,23 @@ echo "Registry path: $REG_PATH"
 echo "Port: $PORT"
 echo "Verify signatures: $VERIFY"
 
-# Check if stackql binary exists
-if [ ! -f "$BASE_DIR/stackql" ]; then
+# Resolve the stackql binary: $STACKQL, ./stackql, `stackql` on PATH, else
+# download the latest release into the repo root (gitignored).
+if [ -n "${STACKQL:-}" ] && [ -x "$STACKQL" ]; then
+  STACKQL_BIN="$STACKQL"
+elif [ -x "$BASE_DIR/stackql" ]; then
+  STACKQL_BIN="$BASE_DIR/stackql"
+elif command -v stackql > /dev/null 2>&1; then
+  STACKQL_BIN="$(command -v stackql)"
+else
   echo "StackQL binary not found. Downloading..."
-  
-  # Determine OS and architecture
   OS=$(uname -s | tr '[:upper:]' '[:lower:]')
   ARCH=$(uname -m)
-  
-  # Map architecture to stackql naming
   if [ "$ARCH" = "x86_64" ]; then
     ARCH="amd64"
   elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
     ARCH="arm64"
   fi
-  
-  # Set download URL based on OS
   if [ "$OS" = "darwin" ]; then
     DOWNLOAD_URL="https://releases.stackql.io/stackql/latest/stackql_darwin_${ARCH}.zip"
   elif [ "$OS" = "linux" ]; then
@@ -92,15 +93,15 @@ if [ ! -f "$BASE_DIR/stackql" ]; then
     echo "Please download stackql manually from https://github.com/stackql/stackql/releases"
     exit 1
   fi
-  
-  # Download and extract
   cd "$BASE_DIR"
   curl -L -o stackql.zip "$DOWNLOAD_URL"
   unzip -o stackql.zip
   rm stackql.zip
   chmod +x stackql
+  STACKQL_BIN="$BASE_DIR/stackql"
   echo "StackQL binary downloaded successfully"
 fi
+echo "StackQL binary: $STACKQL_BIN ($("$STACKQL_BIN" --version 2>/dev/null | head -1))"
 
 # Set registry configuration
 if [ "$VERIFY" = "true" ]; then
@@ -118,7 +119,7 @@ fi
 # Start the server
 echo "Starting StackQL server with registry: $REG"
 cd "$BASE_DIR"
-nohup ./stackql --registry="${REG}" --pgsrv.port="${PORT}" srv > stackql-server.log 2>&1 &
+nohup "$STACKQL_BIN" --registry="${REG}" --pgsrv.port="${PORT}" srv > stackql-server.log 2>&1 &
 SERVER_PID=$!
 
 # Check if server started successfully

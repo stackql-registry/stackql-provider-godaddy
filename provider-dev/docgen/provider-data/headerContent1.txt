@@ -4,16 +4,18 @@ hide_title: false
 hide_table_of_contents: false
 keywords:
   - godaddy
+  - domains
+  - dns
   - stackql
   - infrastructure-as-code
   - configuration-as-data
   - cloud inventory
-description: Query, deploy and manage GoDaddy resources using SQL
+description: Query, deploy and manage GoDaddy domains and DNS using SQL
 custom_edit_url: null
-image: /img/providers/godaddy/stackql-godaddy-provider-featured-image.png
+image: /img/stackql-godaddy-provider-featured-image.png
 id: 'provider-intro'
 ---
 
 import CopyableCode from '@site/src/components/CopyableCode/CopyableCode';
 
-Domain registration and web hosting services.
+Domain registration, domain lifecycle management and DNS from GoDaddy, through the GoDaddy Domains APIs (v1, v2 and v3) on the GoDaddy Developer Platform.

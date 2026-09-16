@@ -1,0 +1,7 @@
+{
+  "auth": {
+    "type": "bearer",
+    "credentialsenvvar": "GODADDY_API_KEY"
+  },
+  "snake_case_aliases": true
+}

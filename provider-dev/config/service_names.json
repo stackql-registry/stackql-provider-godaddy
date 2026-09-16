@@ -1,0 +1,35 @@
+{
+  "_comment": "Ordered path rules (first match wins) that assign every operation in the three pinned GoDaddy Domains specs (v1, v2, v3) to a StackQL service. Consumed by bin/split.mjs and map_operations.mjs; a path with no rule fails the split without writing. v3 paths are matched after their /v3/domains rebase.",
+  "rules": [
+    { "pathRegex": "^/v1/domains/\\{domain\\}/records", "service": "dns" },
+    { "pathRegex": "^/v1/domains/\\{domain\\}/transfer$", "service": "transfers" },
+    { "pathRegex": "^/v1/domains/(agreements|available|contacts/validate|purchase|purchase/.*|suggest|tlds)$", "service": "registration" },
+    { "pathRegex": "^/v1/domains(/\\{domain\\}(/contacts|/verifyRegistrantEmail|/renew)?)?$", "service": "domains" },
+    { "pathRegex": "^/v2/customers/\\{customerId\\}/domains/\\{domain\\}/transfer", "service": "transfers" },
+    { "pathRegex": "^/v2/customers/\\{customerId\\}/domains/forwards/", "service": "dns" },
+    { "pathRegex": "^/v2/customers/\\{customerId\\}/domains/register", "service": "registration" },
+    { "pathRegex": "^/v2/customers/\\{customerId\\}/domains/(\\{domain\\}|notifications)", "service": "domains" },
+    { "pathRegex": "^/v2/domains/usage/", "service": "domains" },
+    { "pathRegex": "^/v3/domains/zones/", "service": "dns" },
+    { "pathRegex": "^/v3/domains/(suggestions|check-availability|registration-quotes|registrations)", "service": "registration" },
+    { "pathRegex": "^/v3/domains/(domain-names|operations)", "service": "domains" }
+  ],
+  "services": {
+    "domains": {
+      "title": "Domains",
+      "description": "Registered domain inventory, settings and lifecycle: domain details, contacts, nameservers, renewal, cancellation, registrant changes, privacy forwarding, pending actions and notifications (Domains v1 and v2), the v3 domain list and asynchronous operations, and monthly API usage."
+    },
+    "dns": {
+      "title": "DNS",
+      "description": "DNS zone records (Domains v1 bulk record management and the Domains v3 record-id based CRUD) and domain forwarding rules (Domains v2)."
+    },
+    "registration": {
+      "title": "Registration",
+      "description": "Finding and registering domains: availability checks, suggestions, TLDs, legal agreements, purchase schemas and validation (Domains v1), asynchronous registration (Domains v2), and the quote-then-register model with registration status (Domains v3)."
+    },
+    "transfers": {
+      "title": "Transfers",
+      "description": "Inbound and outbound domain transfers: the Domains v1 transfer-in order and the Domains v2 asynchronous transfer workflow (accept, cancel, restart, retry, transfer out, accept or reject an outbound transfer)."
+    }
+  }
+}

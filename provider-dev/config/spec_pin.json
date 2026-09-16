@@ -1,0 +1,40 @@
+{
+  "specs": {
+    "domains-v1": {
+      "url": "https://developer.godaddy.com/openapi/domains-v1.json",
+      "filename": "domains-v1.json",
+      "title": "GoDaddy Domains API v1",
+      "spec_version": "1.0.0",
+      "openapi": "3.1.1",
+      "paths": 17,
+      "operations": 23,
+      "sha256": "2fa1a61dc61fa5a460d10a84a8948060517c6f90332bd277f62d0422915587aa",
+      "bytes": 339286,
+      "fetched": "2026-09-16"
+    },
+    "domains-v2": {
+      "url": "https://developer.godaddy.com/openapi/domains-v2.json",
+      "filename": "domains-v2.json",
+      "title": "GoDaddy Domains API v2",
+      "spec_version": "1.0.0",
+      "openapi": "3.1.1",
+      "paths": 23,
+      "operations": 30,
+      "sha256": "18761574474f6fe62a8e96c9e5c71090b24b0b913bf30ed872f60139f89dfc77",
+      "bytes": 224966,
+      "fetched": "2026-09-16"
+    },
+    "domains-v3": {
+      "url": "https://developer.godaddy.com/openapi/domains-v3.json",
+      "filename": "domains-v3.json",
+      "title": "Domain Lifecycle Management API",
+      "spec_version": "3.1.0",
+      "openapi": "3.1.0",
+      "paths": 12,
+      "operations": 14,
+      "sha256": "dc25af4f579d387f5a1e4323230cd027cbdfcda47d3784420c65e7c731c6fffb",
+      "bytes": 148743,
+      "fetched": "2026-09-16"
+    }
+  }
+}
