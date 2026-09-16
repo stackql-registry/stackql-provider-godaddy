@@ -1,0 +1,10 @@
+{
+  "_comment": "Path-level server template applied by provider-dev/scripts/post_process.mjs to every Domains v2 customer-scoped operation (paths under /v2/customers/{customerId}/...). The customer_id server variable is resolved from GODADDY_CUSTOMER_ID (x-stackQL-envVar) when set; otherwise it is a required parameter on those methods. A WHERE customer_id value always wins over the environment.",
+  "url": "https://api.godaddy.com/v2/customers/{customer_id}",
+  "variables": {
+    "customer_id": {
+      "description": "GoDaddy customer identifier (UUID, not the numeric shopper number). Resolved from the GODADDY_CUSTOMER_ID environment variable when it is set (x-stackQL-envVar); otherwise it must be supplied on every query as WHERE customer_id = '<uuid>'. A WHERE value always takes precedence over the environment. API resellers acting on behalf of a subaccount pass the subaccount customer identifier.",
+      "x-stackQL-envVar": "GODADDY_CUSTOMER_ID"
+    }
+  }
+}

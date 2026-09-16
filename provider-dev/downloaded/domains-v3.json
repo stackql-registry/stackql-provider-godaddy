@@ -1,0 +1,3798 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Domain Lifecycle Management API",
+    "version": "3.1.0",
+    "x-visibility": "public",
+    "description": "The GoDaddy Domain Lifecycle Management API provides comprehensive capabilities\nfor discovering, registering, managing, renewing, transferring, and reselling\ndomain names. This is major version 3, designed for agent-first interactions\nwhile remaining fully usable by direct API clients and resellers.\n\n## Namespace\n\nAll paths are under `/v3/domains/`. The namespace is `domains` (the business capability);\nthe core entity collection is `/domain-names`.\n\n## Key Conventions\n\n**Quote/execute for commercial operations.** Every commercial mutation (register,\nrenew, transfer) requires a `quoteToken` minted by the corresponding quote\ncollection endpoint. Execution without a prior quote is structurally impossible.\nThe token locks the price, resolved settings, and required legal agreements for a\n10-minute TTL. Quote calls are free, read-only, and safe to call speculatively.\n\n**Async commercial operations.** `POST /registrations`, `POST /renewals`, and\n`POST /transfers` each return `202 Accepted` with the concrete entity body\n(`Registration`, `Renewal`, or `Transfer`) and a `Location` header. Poll\n`links[rel=self]` on the returned entity until status is `COMPLETED` or `FAILED`.\nEach concrete resource is also reachable via `GET /operations/{operationId}`;\nthe `operationId` is included in the entity for clients that prefer the abstract\nview. Non-commercial mutations return a `DomainOperation` body.\n\n**Entity-oriented resource model.** Domains are the core entity of this API\n(exposed as `/domain-names` in the path to distinguish the resource collection\nfrom the `domains` namespace prefix). Register, renew, and transfer are\ncommercial actions executed by `POST` to their corresponding top-level\nresource collections (`/registrations`, `/renewals`, `/transfers`); each\naccepts a prior quote and returns an async entity to poll until completion.\nFor commercial execute calls, the target domain is\nexpressed in the request body, not the path. Sub-resources (`contacts`,\n`nameservers`, `privacy`, `auto-renew`, `transfer-lock`, `records`) only exist\nin the context of a specific domain-name instance. The `/check-availability`\ncontroller carries no persistent identity.\n\n**Flat, two-level maximum.** No resource path goes deeper than\n`/{collection}/{id}/{sub-resource}` or `/{collection}/{id}/{sub-collection}/{id}`.\n\n**Reseller on-behalf-of.** Resellers pass `X-Shopper-Id`; all operations are\nthen scoped to that shopper. Absent the header, the authenticated entity's own\naccount is used.\n\n## Launch Scope (v3.0)\nStandard TLDs only. TLDs with eligibility requirements (.us, .ca, .eu) return\n`UNSUPPORTED_TLD` until Phase 2.\n",
+    "contact": {
+      "name": "GoDaddy Domains Platform",
+      "x-slack-channel": "#domains_beplat_eng",
+      "x-visibility": "private"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.{environment-subdomain}.com/v3/domains",
+      "description": "Domain Lifecycle Management API v3",
+      "variables": {
+        "environment-subdomain": {
+          "default": "godaddy",
+          "description": "Environment subdomain",
+          "enum": [
+            "godaddy",
+            "ote-godaddy",
+            "test-godaddy",
+            "dev-godaddy"
+          ]
+        }
+      }
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Discovery",
+      "description": "Indicative, non-committing operations for finding and checking domains. Use suggestDomains for natural-language queries and getDomainAvailability for specific domain verification. Both return indicative pricing; locked pricing is established only at quote time. The check-availability controller carries no persistent identity.\n"
+    },
+    {
+      "name": "Registration Quotes",
+      "description": "Quote a domain registration. Returns a locked price, resolved settings, required agreements, and a single-use quoteToken. Free and read-only.\n"
+    },
+    {
+      "name": "Registrations",
+      "description": "Top-level registration entity collection. Execute a domain registration by POSTing with a quoteToken, domain, period, and consent. Returns a Registration entity with links to the concrete poll URL (GET /registrations/{registrationId}) and the abstract operation (GET /operations/{operationId}).\n"
+    },
+    {
+      "name": "Domains",
+      "description": "The core domain entity collection. Supports listing and reading owned domain records, and cancelling registrations.\n"
+    },
+    {
+      "name": "Domain Management",
+      "description": "Non-commercial async mutations on owned domain instances: contacts, nameservers, privacy, auto-renew, and transfer-lock. All sub-resources of /domain-names/{domain-name}. All mutations return a DomainOperation for polling.\n"
+    },
+    {
+      "name": "Records",
+      "description": "CRUD operations on DNS records within the GoDaddy-managed zone. Sub-collection of /zones/{zone}. Changes are applied synchronously.\n"
+    },
+    {
+      "name": "Operations",
+      "description": "Abstract operation polling. Poll GET /operations/{operationId} for any domain mutation until it reaches COMPLETED or FAILED. Operation IDs are unique across Registration, Renewal, and Transfer — clients that prefer typed polling can use the concrete resource endpoints instead.\n"
+    }
+  ],
+  "components": {
+    "parameters": {
+      "xRequestId": {
+        "name": "X-Request-Id",
+        "in": "header",
+        "description": "Optional client-generated request correlation identifier, propagated across services and returned in the response X-Request-Id header.\n",
+        "required": false,
+        "schema": {
+          "$ref": "#/x-ext/e6ced4f"
+        }
+      },
+      "iscCode": {
+        "name": "iscCode",
+        "in": "query",
+        "description": "ISC (International Shopper Code) for pricing context. When provided, prices reflect the applicable rates for this ISC.\n",
+        "required": false,
+        "schema": {
+          "type": "string"
+        },
+        "example": "ISC_PARTNER_001"
+      },
+      "pageToken": {
+        "name": "pageToken",
+        "in": "query",
+        "description": "Opaque cursor from the links[rel=next or rel=prev] href of the previous page. When present, the response begins immediately after the item that produced the token. Omit to start from the beginning of the collection.\n",
+        "required": false,
+        "schema": {
+          "type": "string"
+        },
+        "example": "eyJkb21haW4iOiJleGFtcGxlLmNvbSJ9"
+      },
+      "pageTokenDirection": {
+        "name": "pageTokenDirection",
+        "in": "query",
+        "description": "Optional token direction when `pageToken` is set; ignored otherwise.\n",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "enum": [
+            "backward",
+            "forward"
+          ]
+        }
+      },
+      "idempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "description": "Client-generated unique key (UUID recommended). Retrying a mutating request with the same Idempotency-Key returns the original response without creating a duplicate side effect. Required on all execute endpoints.\n",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 64
+        },
+        "example": "9f1c2e7a-4b3d-4e8f-a1c2-3d4e5f6a7b8c"
+      },
+      "domainNamePath": {
+        "name": "domain-name",
+        "in": "path",
+        "description": "The domain name in punycode A-label form (e.g., example.com). For IDNs, use the punycode representation.\n",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "example": "example.com"
+      },
+      "registrationId": {
+        "name": "registrationId",
+        "in": "path",
+        "description": "Server-assigned registration identifier.",
+        "required": true,
+        "schema": {
+          "$ref": "#/x-ext/e6ced4f"
+        }
+      },
+      "operationId": {
+        "name": "operationId",
+        "in": "path",
+        "description": "The server-assigned operation identifier returned in the 202 response of any async domain mutation.\n",
+        "required": true,
+        "schema": {
+          "$ref": "#/x-ext/e6ced4f"
+        },
+        "example": "9f1c2e7a-4b3d-4e8f-a1c2-3d4e5f6a7b8c"
+      },
+      "zonePath": {
+        "name": "zone",
+        "in": "path",
+        "description": "The domain name in punycode A-label form (for example, example.com). For IDNs, use the punycode representation.\n",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "example": "example.com"
+      },
+      "recordId": {
+        "name": "recordId",
+        "in": "path",
+        "description": "Server-assigned DNS record identifier within the zone.",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "example": "Aad7oqdXCms9mlJvm_m6UFYqmwjyP20H2KBmQHgttK9kGbF_TuI3knsocArQqIv5I0Kq5C0"
+      },
+      "page": {
+        "name": "page",
+        "in": "query",
+        "description": "One-based page number for offset-based pagination. Defaults to 1.\n",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        },
+        "example": 2
+      },
+      "pageSize": {
+        "name": "pageSize",
+        "in": "query",
+        "description": "Maximum number of items to return per page.\n",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 25
+        },
+        "example": 25
+      },
+      "totalRequired": {
+        "name": "totalRequired",
+        "in": "query",
+        "description": "When true, the response includes totalItems and totalPages for the current filter when at least one record matches. Both are omitted when the result set is empty. Defaults to false; omitting totals avoids the cost of a count query on large collections.\n",
+        "required": false,
+        "schema": {
+          "type": "boolean",
+          "default": false
+        },
+        "example": true
+      },
+      "fields": {
+        "name": "fields",
+        "in": "query",
+        "description": "Comma-separated list of fields to include in each item of the response. Omitted fields are excluded from the payload. When absent, all fields are returned. Field names must match properties defined on the item schema for the operation; any unknown or invalid name returns 400 Bad Request.\n",
+        "required": false,
+        "schema": {
+          "type": "string"
+        },
+        "example": "name,type,data,ttl"
+      }
+    },
+    "headers": {
+      "xRequestId": {
+        "description": "Request correlation identifier echoed from the request or server-generated.",
+        "schema": {
+          "$ref": "#/x-ext/e6ced4f"
+        }
+      },
+      "location": {
+        "description": "URL of the created or async resource.",
+        "schema": {
+          "type": "string",
+          "format": "uri"
+        }
+      },
+      "retryAfter": {
+        "description": "Suggested number of seconds before the client should poll again. Present on 202 responses and non-terminal operation poll responses.\n",
+        "schema": {
+          "type": "integer",
+          "example": 5
+        }
+      }
+    },
+    "responses": {
+      "400": {
+        "description": "Malformed request syntax, missing required field, or invalid field type.",
+        "headers": {
+          "X-Request-Id": {
+            "$ref": "#/components/headers/xRequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/x-ext/21ae8c5"
+            }
+          }
+        }
+      },
+      "401": {
+        "description": "Authentication credentials are missing or invalid.",
+        "headers": {
+          "X-Request-Id": {
+            "$ref": "#/components/headers/xRequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/x-ext/21ae8c5"
+            }
+          }
+        }
+      },
+      "403": {
+        "description": "Authenticated identity is not authorized to perform this operation.",
+        "headers": {
+          "X-Request-Id": {
+            "$ref": "#/components/headers/xRequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/x-ext/21ae8c5"
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "The requested resource was not found.",
+        "headers": {
+          "X-Request-Id": {
+            "$ref": "#/components/headers/xRequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/x-ext/21ae8c5"
+            }
+          }
+        }
+      },
+      "409": {
+        "description": "Conflict — the request cannot be completed in the current state. Used for quote lifecycle errors (quote_expired, quote_consumed), domain state conflicts such as domain_already_exists, and immutable DNS records (dns_record_not_mutable) such as GoDaddy-managed SOA and NS records.\n",
+        "headers": {
+          "X-Request-Id": {
+            "$ref": "#/components/headers/xRequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/x-ext/21ae8c5"
+            }
+          }
+        }
+      },
+      "422": {
+        "description": "Semantically invalid request — valid structure but violates a business rule, such as an ineligible contact, unsupported TLD, non-renewable domain status, or quote_mismatch (e.g. iscCode or acknowledgedFees that do not match the locked quote).\n",
+        "headers": {
+          "X-Request-Id": {
+            "$ref": "#/components/headers/xRequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/x-ext/21ae8c5"
+            }
+          }
+        }
+      },
+      "429": {
+        "description": "Too many requests — rate limit exceeded.",
+        "headers": {
+          "X-Request-Id": {
+            "$ref": "#/components/headers/xRequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/x-ext/21ae8c5"
+            }
+          }
+        }
+      },
+      "503": {
+        "description": "Service temporarily unavailable.",
+        "headers": {
+          "X-Request-Id": {
+            "$ref": "#/components/headers/xRequestId"
+          },
+          "Retry-After": {
+            "$ref": "#/components/headers/retryAfter"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/x-ext/21ae8c5"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Agreement": {
+        "$ref": "#/x-ext/3e9571a"
+      },
+      "Availability": {
+        "$ref": "#/x-ext/8ac9047"
+      },
+      "AvailabilityCheckCriteria": {
+        "$ref": "#/x-ext/77ae6b4"
+      },
+      "Consent": {
+        "$ref": "#/x-ext/fd3a330"
+      },
+      "ConsentActor": {
+        "$ref": "#/x-ext/ffe7359"
+      },
+      "DNSRecord": {
+        "$ref": "#/x-ext/b820fe6"
+      },
+      "DNSRecords": {
+        "$ref": "#/x-ext/e0e1d47"
+      },
+      "NameServers": {
+        "$ref": "#/x-ext/26eb9a5"
+      },
+      "NameserverHostname": {
+        "$ref": "#/x-ext/bf9c5f0"
+      },
+      "Domain": {
+        "$ref": "#/x-ext/7244d8c"
+      },
+      "DomainOperation": {
+        "$ref": "#/x-ext/51563a3"
+      },
+      "DomainOperationResult": {
+        "$ref": "#/x-ext/3becb0e"
+      },
+      "Error": {
+        "$ref": "#/x-ext/21ae8c5"
+      },
+      "Fee": {
+        "$ref": "#/x-ext/a12fb6c"
+      },
+      "Registration": {
+        "$ref": "#/x-ext/a83bac3"
+      },
+      "InlineRegistrationProfile": {
+        "$ref": "#/x-ext/c521303"
+      },
+      "RegistrationQuote": {
+        "$ref": "#/x-ext/f64cd91"
+      },
+      "ResolvedSettings": {
+        "$ref": "#/x-ext/51108fa"
+      },
+      "Suggestion": {
+        "$ref": "#/x-ext/a4552e9"
+      },
+      "TermPrice": {
+        "$ref": "#/x-ext/50f74db"
+      },
+      "DomainCollection": {
+        "$ref": "#/x-ext/0dbf450"
+      },
+      "DomainLifecycleGroup": {
+        "$ref": "#/x-ext/847c074"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Personal Access Token (PAT). Generate one from the developer dashboard. Pass as: `Authorization: Bearer <token>`."
+      }
+    }
+  },
+  "paths": {
+    "x-visibility": "public",
+    "/suggestions": {
+      "get": {
+        "operationId": "suggestDomains",
+        "tags": [
+          "Discovery"
+        ],
+        "summary": "Suggest available domains for a query",
+        "description": "Returns available domain name suggestions for a natural-language query\nor keyword set. All results are available (available-only contract).\nPrices are indicative; the authoritative price and availability check\nis at quote time.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/xRequestId"
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "description": "Natural-language query or keywords describing the desired domain, e.g. \"sunrise bakery\". Used to generate creative and keyword-spin suggestions.\n",
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "example": "sunrise bakery"
+          },
+          {
+            "name": "tlds",
+            "in": "query",
+            "required": false,
+            "description": "Top-level domains to be included in suggestions.",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "example": [
+              "com",
+              "net",
+              "shop"
+            ]
+          },
+          {
+            "name": "lengthMax",
+            "in": "query",
+            "required": false,
+            "description": "Maximum length of second-level domain.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "lengthMin",
+            "in": "query",
+            "required": false,
+            "description": "Minimum length of second-level domain.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "description": "Maximum number of suggestions in the response. Defaults to 10 when omitted.\n",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 10
+            }
+          },
+          {
+            "name": "sources",
+            "in": "query",
+            "required": false,
+            "description": "Suggestion source strategies to activate.\n",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/x-ext/6d77c8e"
+              }
+            },
+            "example": [
+              "EXTENSION",
+              "KEYWORD_SPIN"
+            ]
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Suggested available domains sorted by relevance.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/xRequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "description": "Available domain suggestions, sorted by relevance. All items are available by contract.\n",
+                      "items": {
+                        "$ref": "#/components/schemas/Suggestion"
+                      }
+                    }
+                  }
+                },
+                "examples": {
+                  "suggestions": {
+                    "summary": "Two suggestions with per-term pricing",
+                    "value": {
+                      "items": [
+                        {
+                          "domain": "sunrisebakery.com",
+                          "inventory": "REGISTRY",
+                          "prices": [
+                            {
+                              "term": "YEAR",
+                              "period": 1,
+                              "price": {
+                                "currencyCode": "USD",
+                                "value": 1199
+                              },
+                              "renewalPrice": {
+                                "currencyCode": "USD",
+                                "value": 2299
+                              }
+                            },
+                            {
+                              "term": "YEAR",
+                              "period": 2,
+                              "price": {
+                                "currencyCode": "USD",
+                                "value": 3098
+                              },
+                              "renewalPrice": {
+                                "currencyCode": "USD",
+                                "value": 4598
+                              },
+                              "firstTermPrice": {
+                                "currencyCode": "USD",
+                                "value": 799
+                              },
+                              "recommended": true
+                            }
+                          ]
+                        },
+                        {
+                          "domain": "sunrisebakery.shop",
+                          "inventory": "REGISTRY",
+                          "prices": [
+                            {
+                              "term": "YEAR",
+                              "period": 1,
+                              "price": {
+                                "currencyCode": "USD",
+                                "value": 299
+                              },
+                              "renewalPrice": {
+                                "currencyCode": "USD",
+                                "value": 599
+                              }
+                            },
+                            {
+                              "term": "YEAR",
+                              "period": 2,
+                              "price": {
+                                "currencyCode": "USD",
+                                "value": 798
+                              },
+                              "renewalPrice": {
+                                "currencyCode": "USD",
+                                "value": 1198
+                              },
+                              "firstTermPrice": {
+                                "currencyCode": "USD",
+                                "value": 199
+                              },
+                              "recommended": true
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          }
+        }
+      }
+    },
+    "/check-availability": {
+      "get": {
+        "operationId": "getDomainAvailability",
+        "tags": [
+          "Discovery"
+        ],
+        "summary": "Check availability of a single domain",
+        "description": "Returns an indicative availability result for one domain, including\nper-term pricing when available. Availability is best-effort; the\nauthoritative check is performed at quote time. This operation does\nnot persist the check — there is no check identity or poll URL.\n\nA domain that cannot be checked is still returned as a `200` with an\n`error` object on the body; request-level failures use the `4xx` responses.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/xRequestId"
+          },
+          {
+            "name": "domain",
+            "in": "query",
+            "required": true,
+            "description": "The domain name to check, in punycode A-label form for IDNs.",
+            "schema": {
+              "type": "string"
+            },
+            "example": "example.com"
+          },
+          {
+            "name": "optimizeFor",
+            "in": "query",
+            "required": false,
+            "description": "Optional. When omitted, defaults to SPEED. Availability is always re-verified authoritatively at quote time regardless of this setting.\n",
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/x-ext/ae5973b"
+                }
+              ],
+              "default": "SPEED"
+            },
+            "example": "SPEED"
+          },
+          {
+            "$ref": "#/components/parameters/iscCode"
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Availability result for the requested domain.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/xRequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Availability"
+                },
+                "examples": {
+                  "available": {
+                    "summary": "Available domain with per-term pricing",
+                    "value": {
+                      "domain": "coffee24x7x365.com",
+                      "available": true,
+                      "definitive": false,
+                      "inventory": "REGISTRY",
+                      "prices": [
+                        {
+                          "term": "YEAR",
+                          "period": 1,
+                          "price": {
+                            "currencyCode": "USD",
+                            "value": 1199
+                          },
+                          "renewalPrice": {
+                            "currencyCode": "USD",
+                            "value": 2299
+                          }
+                        },
+                        {
+                          "term": "YEAR",
+                          "period": 2,
+                          "price": {
+                            "currencyCode": "USD",
+                            "value": 3098
+                          },
+                          "renewalPrice": {
+                            "currencyCode": "USD",
+                            "value": 4598
+                          },
+                          "firstTermPrice": {
+                            "currencyCode": "USD",
+                            "value": 799
+                          }
+                        },
+                        {
+                          "term": "YEAR",
+                          "period": 3,
+                          "price": {
+                            "currencyCode": "USD",
+                            "value": 4599
+                          },
+                          "renewalPrice": {
+                            "currencyCode": "USD",
+                            "value": 6897
+                          },
+                          "firstTermPrice": {
+                            "currencyCode": "USD",
+                            "value": 499
+                          },
+                          "recommended": true
+                        },
+                        {
+                          "term": "YEAR",
+                          "period": 5,
+                          "price": {
+                            "currencyCode": "USD",
+                            "value": 9197
+                          },
+                          "renewalPrice": {
+                            "currencyCode": "USD",
+                            "value": 11495
+                          },
+                          "firstTermPrice": {
+                            "currencyCode": "USD",
+                            "value": 100
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          }
+        }
+      },
+      "post": {
+        "operationId": "checkAvailability",
+        "tags": [
+          "Discovery"
+        ],
+        "summary": "Check availability of one or more specific domains",
+        "description": "Batch controller for domain availability checking. Accepts 1–25 domain\nnames alongside optional check criteria (optimization mode, ISC pricing\ncode). Returns one Availability result per requested domain in input\norder inside `{ items: [...] }`. Domains that cannot be checked carry\nan `error` object on that item.\n\nFor a single domain, GET /check-availability (getDomainAvailability)\noffers the same check semantics and Availability result without a\nrequest body; the response is the lone item unwrapped.\n\nAvailability is best-effort indicative; the authoritative check is\nalways performed at quote time. This controller does not persist the\ncheck — there is no check identity or poll URL.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/xRequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AvailabilityCheckCriteria"
+              },
+              "examples": {
+                "defaultBehavior": {
+                  "summary": "Omit optimizeFor — defaults to SPEED",
+                  "value": {
+                    "domains": [
+                      "example.com",
+                      "example.net"
+                    ]
+                  }
+                },
+                "speedCheck": {
+                  "summary": "Check two domains using cached data",
+                  "value": {
+                    "domains": [
+                      "example.com",
+                      "example.net"
+                    ],
+                    "optimizeFor": "SPEED"
+                  }
+                },
+                "accuracyCheck": {
+                  "summary": "Live registry check with ISC pricing context",
+                  "value": {
+                    "domains": [
+                      "example.com"
+                    ],
+                    "optimizeFor": "ACCURACY",
+                    "iscCode": "ISC_PARTNER_001"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Per-domain availability results in request order. Uncheckable items carry an error object.\n",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/xRequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "description": "Availability results in the same order as the domains array in the request body.\n",
+                      "items": {
+                        "$ref": "#/components/schemas/Availability"
+                      }
+                    }
+                  }
+                },
+                "examples": {
+                  "mixedResults": {
+                    "summary": "One available domain and one uncheckable domain",
+                    "value": {
+                      "items": [
+                        {
+                          "domain": "example.com",
+                          "available": true,
+                          "definitive": false,
+                          "inventory": "REGISTRY",
+                          "prices": [
+                            {
+                              "term": "YEAR",
+                              "period": 1,
+                              "price": {
+                                "currencyCode": "USD",
+                                "value": 1999
+                              },
+                              "renewalPrice": {
+                                "currencyCode": "USD",
+                                "value": 1999
+                              }
+                            },
+                            {
+                              "term": "YEAR",
+                              "period": 2,
+                              "price": {
+                                "currencyCode": "USD",
+                                "value": 3098
+                              },
+                              "renewalPrice": {
+                                "currencyCode": "USD",
+                                "value": 4598
+                              },
+                              "firstTermPrice": {
+                                "currencyCode": "USD",
+                                "value": 799
+                              }
+                            },
+                            {
+                              "term": "YEAR",
+                              "period": 3,
+                              "price": {
+                                "currencyCode": "USD",
+                                "value": 4599
+                              },
+                              "renewalPrice": {
+                                "currencyCode": "USD",
+                                "value": 6897
+                              },
+                              "firstTermPrice": {
+                                "currencyCode": "USD",
+                                "value": 499
+                              },
+                              "recommended": true
+                            }
+                          ]
+                        },
+                        {
+                          "domain": "invalid..com",
+                          "error": {
+                            "name": "MISMATCH_FORMAT",
+                            "correlationId": "9f1c2e7a-4b3d-4e8f-a1c2-3d4e5f6a7b8c",
+                            "message": "does not conform to the 'domain' format, based on pattern: /^[^.\\s]{1,63}(\\.[^.\\s]{1,63}){1,2}$/"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          }
+        }
+      }
+    },
+    "/registration-quotes": {
+      "post": {
+        "operationId": "quoteDomainRegistration",
+        "tags": [
+          "Registration Quotes"
+        ],
+        "summary": "Quote a single-domain registration (no commitment)",
+        "description": "Prices the registration, resolves contact and preference settings,\nreturns required legal agreements, and mints a single-use quoteToken\nwith a 10-minute TTL. Free and read-only; safe to call speculatively.\n\nWhen the domain is unavailable, `available: false` is returned with\nno quoteToken — this is a valid non-error response.\n\nWhen required contact fields are missing, a `422` is returned with\nfield-level details so the agent can collect the missing data and re-quote.\n\nMay pass `iscCode` to lock pricing at applicable rates;\nthe same value must be supplied on /registrations if provided here.\nThe `period` supplied here must be re-supplied on /registrations;\na mismatch returns `quote_mismatch`.\nIf `profile` or `profileId` is supplied here, the same value must be\nre-supplied on /registrations; a mismatch returns `quote_mismatch`.\n\n**PREMIUM domains:** when the quoted domain has inventory `PREMIUM`,\nthe response includes a `fees` array containing a\n`ONE_TIME_PREMIUM_DOMAIN_PURCHASE` entry. The execute request must\necho this array verbatim in `consent.acknowledgedFees` to confirm\nthe customer accepted the specific charge before the irreversible\npurchase proceeds.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/xRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/iscCode"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "domain"
+                ],
+                "properties": {
+                  "domain": {
+                    "type": "string",
+                    "description": "The domain name to quote, in punycode A-label form.",
+                    "example": "example.com"
+                  },
+                  "period": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10,
+                    "default": 1,
+                    "description": "Registration period in years. If supplied, the same value must be re-supplied on /registrations."
+                  },
+                  "profileId": {
+                    "allOf": [
+                      {
+                        "$ref": "#/x-ext/e6ced4f"
+                      },
+                      {
+                        "description": "ID of a saved registration profile. Omit to fall back to the account-default profile or account identity.\n"
+                      }
+                    ]
+                  },
+                  "profile": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/InlineRegistrationProfile"
+                      },
+                      {
+                        "description": "One-time inline contacts and purchase preference defaults for this quote. Not persisted.\n"
+                      }
+                    ]
+                  }
+                }
+              },
+              "examples": {
+                "minimal": {
+                  "summary": "Minimal — derive registrant from account identity",
+                  "value": {
+                    "domain": "example.com"
+                  }
+                },
+                "withProfile": {
+                  "summary": "With saved profile ID",
+                  "value": {
+                    "domain": "example.com",
+                    "period": 2,
+                    "profileId": "14514a29-5fce-4624-8d8a-d8abd56015e2"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Registration quote. When available is false, no quoteToken is returned; this is not an error.\n",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/xRequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistrationQuote"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          }
+        }
+      }
+    },
+    "/registrations": {
+      "post": {
+        "operationId": "registerDomain",
+        "tags": [
+          "Registrations"
+        ],
+        "summary": "Register a domain (requires quoteToken)",
+        "description": "Executes a previously quoted domain registration. **Irreversible once\naccepted; creates a charge.** Requires a valid unexpired quoteToken from\n`quoteDomainRegistration`, an `Idempotency-Key` header, and a consent\nrecord. The target domain and period are in the request body alongside\nthe quoteToken.\n\nBefore calling this endpoint, retrieve `requiredAgreements` from the\nquote response and review each agreement before submitting the registration. Each agreement\nincludes a `title` (display label) and optional `url` (full legal text).\nThe `consent.agreementTypes` array must contain the `agreementType` value\nfrom every item in `requiredAgreements`; a mismatch returns\n`INVALID_AGREEMENT_KEYS`.\n\nIdempotency takes precedence over the single-use check: retrying with\nthe same `Idempotency-Key` replays the original operation even after\nthe token is consumed.\n\nReturns a `Registration` entity. Poll `links[rel=self]`\n(`GET /registrations/{registrationId}`) until status is `COMPLETED` or\n`FAILED`. The `operationId` field is also provided for clients that\nprefer `GET /operations/{operationId}`; both resolve the same resource.\n\nPoll either until status is `COMPLETED` or `FAILED`. The operation is\nfire-and-forget; always poll at least once even if the server completed\nit synchronously.\n\nWhen `iscCode` was supplied at quote time, the same value must be\nprovided here or the request fails with `422 quote_mismatch`.\nWhen `period` was supplied at quote time, the same value must be\nprovided here or the request fails with `422 quote_mismatch`.\nWhen `profile` or `profileId` was supplied at quote time, the same\nvalue must be provided here or the request fails with `422 quote_mismatch`.\n\n**PREMIUM domains:** when the quote's `fees` array is non-empty\n(inventory `PREMIUM`), the execute request must include\n`consent.acknowledgedFees` containing the same fees verbatim —\nsame types, amounts, and currencies. This confirms the customer\nexplicitly saw and accepted the specific charge before the\nirreversible purchase is executed.\n\n- `acknowledgedFees` absent when fees exist → `422` with error\n  name `consent_fees_required` (conditionally required by the quote; the\n  constraint spans two requests and cannot be expressed in the\n  schema).\n- `acknowledgedFees` present but type or amount does not match\n  the locked quote → `422` with error name `quote_mismatch`.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/xRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/idempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/iscCode"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Registration"
+              },
+              "examples": {
+                "withToken": {
+                  "summary": "Standard REGISTRY registration with quoteToken",
+                  "value": {
+                    "domain": "example.com",
+                    "period": 1,
+                    "quoteToken": "7f3a2b1c-9d8e-4012-a5b6-c1d2e3f4a5b6",
+                    "consent": {
+                      "agreementTypes": [
+                        "API_DPA"
+                      ],
+                      "agreedAt": "2026-06-12T10:02:00Z"
+                    }
+                  }
+                },
+                "withPremiumToken": {
+                  "summary": "PREMIUM (Afternic fast-transfer) registration with fee acknowledgment",
+                  "value": {
+                    "domain": "examplepremium.com",
+                    "period": 1,
+                    "quoteToken": "9a1b2c3d-4e5f-6789-abcd-ef0123456789",
+                    "consent": {
+                      "agreementTypes": [
+                        "API_DPA"
+                      ],
+                      "agreedAt": "2026-06-12T10:02:00Z",
+                      "acknowledgedFees": [
+                        {
+                          "type": "ONE_TIME_PREMIUM_DOMAIN_PURCHASE",
+                          "fee": {
+                            "value": 390000,
+                            "currencyCode": "USD"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Registration accepted. Poll the self link for status.\n",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/xRequestId"
+              },
+              "Location": {
+                "$ref": "#/components/headers/location"
+              },
+              "Retry-After": {
+                "$ref": "#/components/headers/retryAfter"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Registration"
+                },
+                "examples": {
+                  "accepted": {
+                    "summary": "Registration accepted with server-derived consent",
+                    "value": {
+                      "registrationId": "3a8f1c2d-7e6b-4f9a-b1c0-d2e3f4a5b6c7",
+                      "domain": "example.com",
+                      "period": 1,
+                      "price": {
+                        "currencyCode": "USD",
+                        "value": 1199
+                      },
+                      "consent": {
+                        "agreementTypes": [
+                          "API_DPA"
+                        ],
+                        "agreedAt": "2026-06-12T10:02:00Z",
+                        "agreedBy": {
+                          "type": "DIRECT",
+                          "principal": "550e8400-e29b-41d4-a716-446655440000",
+                          "ip": "203.0.113.7"
+                        }
+                      },
+                      "status": "CONFIRMED",
+                      "operationId": "9f1c2e7a-4b3d-4e8f-a1c2-3d4e5f6a7b8c",
+                      "createdAt": "2026-06-12T10:02:05Z",
+                      "updatedAt": "2026-06-12T10:02:05Z",
+                      "links": [
+                        {
+                          "rel": "self",
+                          "href": "https://api.godaddy.com/v3/domains/registrations/3a8f1c2d-7e6b-4f9a-b1c0-d2e3f4a5b6c7"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          }
+        }
+      }
+    },
+    "/registrations/{registrationId}": {
+      "get": {
+        "operationId": "getRegistration",
+        "tags": [
+          "Registrations"
+        ],
+        "summary": "Get a registration record",
+        "description": "Returns a single registration record by its server-assigned registrationId, including the current execution status and the domain expiry date once the registration completes. This is the concrete poll endpoint for registration operations; the abstract equivalent is GET /operations/{operationId}.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/xRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/registrationId"
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Registration record returned.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/xRequestId"
+              },
+              "Retry-After": {
+                "$ref": "#/components/headers/retryAfter"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Registration"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          }
+        }
+      }
+    },
+    "/domain-names": {
+      "get": {
+        "operationId": "listDomains",
+        "tags": [
+          "Domains"
+        ],
+        "summary": "List registered domains",
+        "description": "Returns a paginated collection of domain names owned by the authenticated account. Supports filtering by statuses and cursor-based pagination. The statuses and lifecycleGroups parameters are mutually exclusive; supplying both returns 400 Bad Request. An unrecognized value for statuses or lifecycleGroups returns 400 Bad Request.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/xRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/pageToken"
+          },
+          {
+            "$ref": "#/components/parameters/pageTokenDirection"
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "description": "Maximum number of domains in the response. Defaults to 100 when omitted. Offset-based \"page\" parameter is not supported, only cursor-based \"pageToken\".\n",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 100
+            }
+          },
+          {
+            "name": "statuses",
+            "in": "query",
+            "required": false,
+            "description": "Filter results to domains with one or more lifecycle statuses. Supply multiple values as a single comma-separated list, e.g. `?statuses=ACTIVE,EXPIRED`. Multiple values are combined with logical OR — returns domains matching ANY of the specified statuses. See DomainStatus for accepted values (ACTIVE, EXPIRED, PENDING_REGISTRATION, etc.). Cannot be combined with the lifecycleGroups parameter. Use this for precise filtering on specific known status values; for coarse lifecycle phases, consider lifecycleGroups.\n",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "maxItems": 50,
+              "items": {
+                "$ref": "#/x-ext/b594312"
+              }
+            },
+            "example": [
+              "ACTIVE",
+              "EXPIRED"
+            ]
+          },
+          {
+            "name": "lifecycleGroups",
+            "in": "query",
+            "required": false,
+            "description": "Filter results to domains belonging to one or more status groups. Supply multiple values as a single comma-separated list, e.g. `?lifecycleGroups=REGISTERED,PENDING`. Multiple values are combined with logical OR. Cannot be combined with the statuses parameter. Use this for coarse lifecycle phases that remain stable as new statuses are added; for precise filtering, use statuses.\n",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/x-ext/847c074"
+              }
+            },
+            "example": [
+              "REGISTERED",
+              "PENDING"
+            ]
+          },
+          {
+            "name": "updatedAfter",
+            "in": "query",
+            "required": false,
+            "description": "Return only domains last updated after this timestamp (exclusive). Must be a valid RFC 3339 date-time.\n",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "example": "2026-01-01T00:00:00Z"
+          },
+          {
+            "name": "expiresBefore",
+            "in": "query",
+            "required": false,
+            "description": "Return only domains whose registration expires before this timestamp (exclusive). Must be a valid RFC 3339 date-time.\n",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "example": "2027-01-01T00:00:00Z"
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of domains owned by the account.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/xRequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DomainCollection"
+                },
+                "examples": {
+                  "paginated": {
+                    "summary": "First page of active domains with totals",
+                    "value": {
+                      "items": [
+                        {
+                          "domain": "example.com",
+                          "status": "ACTIVE",
+                          "expiresAt": "2027-06-12T10:02:10Z",
+                          "createdAt": "2026-06-12T10:02:10Z",
+                          "autoRenew": true,
+                          "privacy": false,
+                          "transferLock": true,
+                          "nameServers": [
+                            "ns01.domaincontrol.com",
+                            "ns02.domaincontrol.com"
+                          ],
+                          "links": [
+                            {
+                              "rel": "self",
+                              "href": "/v3/domains/domain-names/example.com"
+                            }
+                          ]
+                        },
+                        {
+                          "domain": "mysite.net",
+                          "status": "ACTIVE",
+                          "expiresAt": "2027-08-01T00:00:00Z",
+                          "createdAt": "2025-08-01T00:00:00Z",
+                          "autoRenew": false,
+                          "privacy": true,
+                          "transferLock": true,
+                          "nameServers": [
+                            "ns01.domaincontrol.com",
+                            "ns02.domaincontrol.com"
+                          ],
+                          "links": [
+                            {
+                              "rel": "self",
+                              "href": "/v3/domains/domain-names/mysite.net"
+                            }
+                          ]
+                        }
+                      ],
+                      "links": [
+                        {
+                          "rel": "self",
+                          "href": "/v3/domains/domain-names?statuses=ACTIVE&pageSize=25"
+                        },
+                        {
+                          "rel": "next",
+                          "href": "/v3/domains/domain-names?statuses=ACTIVE&pageSize=25&pageToken=eyJkb21haW4iOiJteXNpdGUubmV0In0"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          }
+        }
+      }
+    },
+    "/domain-names/{domain-name}": {
+      "get": {
+        "operationId": "getDomain",
+        "tags": [
+          "Domains"
+        ],
+        "summary": "Get a registered domain",
+        "description": "Returns the management view of a single registered domain owned by the authenticated account, including status, nameservers, privacy and auto-renew preferences, and expiry date.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/xRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/domainNamePath"
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Domain found.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/xRequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Domain"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          }
+        }
+      }
+    },
+    "/domain-names/{domain-name}/nameservers": {
+      "put": {
+        "operationId": "updateNameservers",
+        "tags": [
+          "Domain Management"
+        ],
+        "summary": "Replace the nameservers for a domain",
+        "description": "Replaces the authoritative nameservers for the domain with the provided list. Minimum 2, maximum 13. Returns a DomainOperation; propagation to the registry is asynchronous.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/xRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/domainNamePath"
+          },
+          {
+            "$ref": "#/components/parameters/idempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NameServers"
+              },
+              "examples": {
+                "nameservers": {
+                  "value": [
+                    "ns1.example.com",
+                    "ns2.example.com"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Nameserver update accepted; poll the operation for completion.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/xRequestId"
+              },
+              "Location": {
+                "$ref": "#/components/headers/location"
+              },
+              "Retry-After": {
+                "$ref": "#/components/headers/retryAfter"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DomainOperation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          }
+        }
+      }
+    },
+    "/zones/{zone}/dns-records": {
+      "get": {
+        "operationId": "listDNSRecords",
+        "tags": [
+          "Records"
+        ],
+        "summary": "List DNS records in a zone",
+        "description": "Returns a paginated collection of DNS resource records for the\nspecified zone. Supports filtering by record type and host name,\nfield projection, and page-based pagination.\n\nPagination uses page (1-based) and pageSize query parameters.\nPass totalRequired=true to include totalItems and totalPages when\nat least one record matches; both are omitted for empty result\nsets. Defaults to false to avoid count-query overhead.\n\nFilter parameters are combined with logical AND. Pagination links\nin the response preserve active filter, pagination, and\nfield-projection parameters.\n\nsortBy and sortOrder are not supported. Results are always\nreturned in canonical zone-file order: resource record type (IANA\nRR type number ascending — e.g. A before NS before CNAME), then\nname, then data. This matches authoritative DNS ordering and is\nnot client-configurable.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/xRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/zonePath"
+          },
+          {
+            "$ref": "#/components/parameters/page"
+          },
+          {
+            "$ref": "#/components/parameters/pageSize"
+          },
+          {
+            "$ref": "#/components/parameters/totalRequired"
+          },
+          {
+            "$ref": "#/components/parameters/fields"
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "description": "Filter results to records of this DNS type.",
+            "schema": {
+              "$ref": "#/x-ext/0f0d62a"
+            },
+            "example": "A"
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "description": "Filter results to records with this host name relative to the zone. Use `@` for the zone apex.\n",
+            "schema": {
+              "type": "string"
+            },
+            "example": "app2"
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated DNS records for the zone.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/xRequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DNSRecords"
+                },
+                "examples": {
+                  "paginated": {
+                    "summary": "Page 2 of filtered A records with totals",
+                    "value": {
+                      "items": [
+                        {
+                          "recordId": "Aad7oqdXCms9mlJvm_m6UFYqmwjyP20H2KBmQHgttK9kGbF_TuI3knsocArQqIv5I0Kq5C0",
+                          "name": "@",
+                          "type": "A",
+                          "data": "192.0.2.1",
+                          "ttl": 3600
+                        },
+                        {
+                          "recordId": "ARZaSm3N9qvJemM6yBmuXIO6F_YIfqSiZcaHhHFozlDsDhdOr1njlXc09TAPJlm8dXqGttRrjRKIgiXpXVm9fms",
+                          "name": "app2",
+                          "type": "A",
+                          "data": "192.0.2.2",
+                          "ttl": 3600
+                        }
+                      ],
+                      "totalItems": 150,
+                      "totalPages": 6,
+                      "links": [
+                        {
+                          "rel": "self",
+                          "href": "https://api.godaddy.com/v3/domains/zones/example.com/dns-records?type=A&name=app2&page=2&pageSize=25&totalRequired=true"
+                        },
+                        {
+                          "rel": "first",
+                          "href": "https://api.godaddy.com/v3/domains/zones/example.com/dns-records?type=A&name=app2&page=1&pageSize=25&totalRequired=true"
+                        },
+                        {
+                          "rel": "last",
+                          "href": "https://api.godaddy.com/v3/domains/zones/example.com/dns-records?type=A&name=app2&page=6&pageSize=25&totalRequired=true"
+                        },
+                        {
+                          "rel": "next",
+                          "href": "https://api.godaddy.com/v3/domains/zones/example.com/dns-records?type=A&name=app2&page=3&pageSize=25&totalRequired=true"
+                        },
+                        {
+                          "rel": "prev",
+                          "href": "https://api.godaddy.com/v3/domains/zones/example.com/dns-records?type=A&name=app2&page=1&pageSize=25&totalRequired=true"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createDNSRecord",
+        "tags": [
+          "Records"
+        ],
+        "summary": "Create a DNS record for a zone",
+        "description": "Creates a new DNS record in the GoDaddy-managed zone. Changes are applied synchronously; no operation polling required.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/xRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/zonePath"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DNSRecord"
+              },
+              "examples": {
+                "aRecord": {
+                  "summary": "Create an A record",
+                  "value": {
+                    "name": "@",
+                    "type": "A",
+                    "data": "192.0.2.1",
+                    "ttl": 3600
+                  }
+                },
+                "mxRecord": {
+                  "summary": "Create an MX record",
+                  "value": {
+                    "name": "@",
+                    "type": "MX",
+                    "data": "mail.example.com.",
+                    "ttl": 3600,
+                    "priority": 10
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "DNS record created.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/xRequestId"
+              },
+              "Location": {
+                "$ref": "#/components/headers/location"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DNSRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          }
+        }
+      }
+    },
+    "/zones/{zone}/dns-records/{recordId}": {
+      "put": {
+        "operationId": "replaceDNSRecord",
+        "tags": [
+          "Records"
+        ],
+        "summary": "Replace a DNS record",
+        "description": "Fully replaces an existing DNS resource record identified by\nrecordId within the zone. All writable fields (name, type, data,\nttl) must be supplied; partial updates are not supported on this\nendpoint. Changes are applied synchronously.\n\nGoDaddy-managed system records (SOA and NS) are read-only. When\nrecordId refers to such a record, the request fails with\n`409 Conflict` — the record exists but cannot be modified.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/xRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/zonePath"
+          },
+          {
+            "$ref": "#/components/parameters/recordId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DNSRecord"
+              },
+              "examples": {
+                "apexARecord": {
+                  "summary": "Replace apex A record",
+                  "value": {
+                    "name": "@",
+                    "type": "A",
+                    "data": "192.0.2.1",
+                    "ttl": 3600
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "DNS record replaced.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/xRequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DNSRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteDNSRecord",
+        "tags": [
+          "Records"
+        ],
+        "summary": "Delete a DNS record",
+        "description": "Permanently removes a DNS resource record from the zone. The\nrecordId must refer to an existing record within the specified\nzone. Changes are applied synchronously.\n\nGoDaddy-managed system records (SOA and NS) are read-only. When\nrecordId refers to such a record, the request fails with\n`409 Conflict` — the record exists but cannot be deleted.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/xRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/zonePath"
+          },
+          {
+            "$ref": "#/components/parameters/recordId"
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "DNS record deleted.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/xRequestId"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          }
+        }
+      }
+    },
+    "/operations/{operationId}": {
+      "get": {
+        "operationId": "getOperation",
+        "tags": [
+          "Operations"
+        ],
+        "summary": "Poll an async domain operation",
+        "description": "Universal poll endpoint for all asynchronous domain mutations. Returns\nthe current state of the operation. Non-terminal responses include a\n`Retry-After` header.\n\nTerminal statuses:\n- `COMPLETED` — operation succeeded; `result` contains the final outcome.\n- `FAILED` — operation terminated with an error; `error` contains detail.\n\nWhile status is non-terminal (`CONFIRMED`, `EXECUTING`), neither\n`result` nor `error` is present. Poll until a terminal status is reached.\n\nThe poll URL is provided in the `Location` header of the initiating 202\nresponse and in `links[rel=self]`. Clients must not construct this URL\nindependently.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/xRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/operationId"
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current operation state.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/xRequestId"
+              },
+              "Retry-After": {
+                "$ref": "#/components/headers/retryAfter"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DomainOperation"
+                },
+                "examples": {
+                  "executing": {
+                    "summary": "Operation in progress",
+                    "value": {
+                      "operationId": "9f1c2e7a-4b3d-4e8f-a1c2-3d4e5f6a7b8c",
+                      "type": "REGISTER",
+                      "domain": "example.com",
+                      "status": "EXECUTING",
+                      "createdAt": "2026-06-12T10:02:05Z",
+                      "updatedAt": "2026-06-12T10:02:07Z",
+                      "links": [
+                        {
+                          "rel": "self",
+                          "href": "https://api.godaddy.com/v3/domains/operations/9f1c2e7a-4b3d-4e8f-a1c2-3d4e5f6a7b8c"
+                        }
+                      ]
+                    }
+                  },
+                  "completed": {
+                    "summary": "Registration completed",
+                    "value": {
+                      "operationId": "9f1c2e7a-4b3d-4e8f-a1c2-3d4e5f6a7b8c",
+                      "type": "REGISTER",
+                      "domain": "example.com",
+                      "status": "COMPLETED",
+                      "result": {
+                        "expiresAt": "2027-06-12T10:02:10Z",
+                        "orderId": "ord_xyz789"
+                      },
+                      "createdAt": "2026-06-12T10:02:05Z",
+                      "updatedAt": "2026-06-12T10:02:10Z",
+                      "links": [
+                        {
+                          "rel": "self",
+                          "href": "https://api.godaddy.com/v3/domains/operations/9f1c2e7a-4b3d-4e8f-a1c2-3d4e5f6a7b8c"
+                        },
+                        {
+                          "rel": "domain",
+                          "href": "https://api.godaddy.com/v3/domains/domain-names/example.com"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "429": {
+            "$ref": "#/components/responses/429"
+          }
+        }
+      }
+    }
+  },
+  "x-ext-urls": {
+    "e6ced4f": "common-types/v1/schemas/yaml/uuid.yaml",
+    "21ae8c5": "common-types/v1/schemas/yaml/error.yaml",
+    "40b48f1": "common-types/v1/schemas/yaml/error-details.yaml",
+    "590647a": "common-types/v1/schemas/yaml/link-description.yaml",
+    "3e9571a": "models/Agreement.yaml",
+    "c21d77b": "enums/AgreementType.yaml",
+    "8ac9047": "models/Availability.yaml",
+    "d7ca784": "enums/InventoryType.yaml",
+    "50f74db": "models/TermPrice.yaml",
+    "f7542cf": "enums/Term.yaml",
+    "18b18ae": "common-types/v1/schemas/yaml/simple-money.yaml",
+    "0163f63": "common-types/v1/schemas/yaml/currency-code.yaml",
+    "a12fb6c": "models/Fee.yaml",
+    "22cbd6e": "enums/FeeType.yaml",
+    "77ae6b4": "models/AvailabilityCheckCriteria.yaml",
+    "ae5973b": "enums/OptimizationTarget.yaml",
+    "fd3a330": "models/Consent.yaml",
+    "37bf2ab": "common-types/v1/schemas/yaml/date-time.yaml",
+    "ffe7359": "models/ConsentActor.yaml",
+    "2fe8a96": "enums/ConsentActorType.yaml",
+    "b820fe6": "models/DNSRecord.yaml",
+    "0f0d62a": "enums/DNSRecordType.yaml",
+    "e0e1d47": "models/DNSRecords.yaml",
+    "26eb9a5": "models/NameServers.yaml",
+    "bf9c5f0": "models/NameserverHostname.yaml",
+    "7244d8c": "models/Domain.yaml",
+    "b594312": "enums/DomainStatus.yaml",
+    "51563a3": "models/DomainOperation.yaml",
+    "e16f6a6": "enums/DomainOperationType.yaml",
+    "a701138": "enums/DomainOperationStatus.yaml",
+    "3becb0e": "models/DomainOperationResult.yaml",
+    "a83bac3": "models/Registration.yaml",
+    "c521303": "models/InlineRegistrationProfile.yaml",
+    "67999d5": "models/Contacts.yaml",
+    "c8dda8d": "models/Contact.yaml",
+    "4945a71": "common-types/v1/schemas/yaml/email-address.yaml",
+    "31009c4": "common-types/v1/schemas/yaml/phone.yaml",
+    "20f26ae": "common-types/v1/schemas/yaml/simple-address.yaml",
+    "56f80e0": "common-types/v1/schemas/yaml/country-code.yaml",
+    "f64cd91": "models/RegistrationQuote.yaml",
+    "51108fa": "models/ResolvedSettings.yaml",
+    "a114951": "enums/ContactSource.yaml",
+    "a4552e9": "models/Suggestion.yaml",
+    "0dbf450": "models/DomainCollection.yaml",
+    "847c074": "enums/DomainLifecycleGroup.yaml",
+    "6d77c8e": "enums/SuggestionSource.yaml"
+  },
+  "x-ext": {
+    "e6ced4f": {
+      "description": "A universally unique identifier (UUID) in [RFC-4122 format](https://tools.ietf.org/html/rfc4122).",
+      "type": "string",
+      "format": "uuid"
+    },
+    "40b48f1": {
+      "title": "Error Details",
+      "type": "object",
+      "description": "The error details. Required for client-side `4XX` errors.",
+      "properties": {
+        "field": {
+          "type": "string",
+          "description": "The field that caused the error. If the field is in the body, set this value to the JSON pointer to that field. Required for client-side errors."
+        },
+        "value": {
+          "type": "string",
+          "description": "The value of the field that caused the error."
+        },
+        "location": {
+          "type": "string",
+          "description": "The location of the field that caused the error. Value is `body`, `path`, or `query`.",
+          "default": "body"
+        },
+        "issue": {
+          "type": "string",
+          "description": "The unique fine-grained application-level error code."
+        },
+        "description": {
+          "type": "string",
+          "description": "The human-readable description for an issue. The description MAY change over the lifetime of an API, so clients MUST NOT depend on this value."
+        }
+      },
+      "required": [
+        "issue"
+      ]
+    },
+    "590647a": {
+      "title": "Link Description",
+      "type": "object",
+      "description": "A request-related [HATEOAS link](https://datatracker.ietf.org/doc/html/draft-handrews-json-schema-hyperschema-02).",
+      "properties": {
+        "href": {
+          "description": "The complete target URL, or link, to use in combination with the method to make the related call, as defined by [RFC 6570 - URI Template](https://tools.ietf.org/html/rfc6570), with the addition of the `$`, `(`, and `)` characters for pre-processing. The `href` is the key HATEOAS component that links a completed call with a subsequent call.",
+          "type": "string",
+          "format": "uri"
+        },
+        "rel": {
+          "description": "The [link relation type](https://tools.ietf.org/html/rfc5988#section-4), which is an identifier for a link that unambiguously describes the semantics of the link. For values, see [Link Relationship Types](https://www.iana.org/assignments/link-relations/link-relations.xhtml).",
+          "type": "string"
+        },
+        "title": {
+          "description": "The link title.",
+          "type": "string"
+        },
+        "targetMediaType": {
+          "description": "The [RFC 2046-defined media type](https://www.ietf.org/rfc/rfc2046.txt) that describes the link target.",
+          "type": "string"
+        },
+        "targetSchema": {
+          "description": "The schema that describes the link target."
+        },
+        "method": {
+          "description": "The method to use to request the link target. For example, for HTTP, this might be `GET` or `DELETE`.",
+          "type": "string"
+        },
+        "submissionMediaType": {
+          "description": "The media type with which to submit data with the request.",
+          "type": "string",
+          "default": "application/json"
+        },
+        "submissionSchema": {
+          "description": "The schema that describes the request data."
+        }
+      },
+      "required": [
+        "rel",
+        "href"
+      ]
+    },
+    "21ae8c5": {
+      "type": "object",
+      "title": "Error",
+      "description": "The error information.",
+      "definitions": {
+        "error-details": {
+          "$ref": "#/x-ext/40b48f1"
+        },
+        "link-description": {
+          "$ref": "#/x-ext/590647a"
+        }
+      },
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The human-readable, unique name of the error."
+        },
+        "correlationId": {
+          "type": "string",
+          "description": "Internal identifier used for correlation purposes."
+        },
+        "message": {
+          "type": "string",
+          "description": "The message that describes the error."
+        },
+        "informationLink": {
+          "type": "string",
+          "description": "The URI for detailed information related to this error for the developer."
+        },
+        "details": {
+          "type": "array",
+          "description": "An array of additional details about the error. Required for client-side `4XX` errors.",
+          "additionalItems": false,
+          "items": {
+            "$ref": "#/x-ext/21ae8c5/definitions/error-details"
+          }
+        },
+        "links": {
+          "type": "array",
+          "description": "An array of error-related HATEOAS links.",
+          "readOnly": true,
+          "items": {
+            "$ref": "#/x-ext/21ae8c5/definitions/link-description",
+            "readOnly": true
+          }
+        }
+      },
+      "required": [
+        "name",
+        "correlationId",
+        "message"
+      ]
+    },
+    "c21d77b": {
+      "title": "Agreement Type",
+      "description": "The type of legal agreement that must be accepted prior to executing a domain operation. Additional agreement types may be returned for specific TLDs or product combinations. API_DPA - API Domain Purchase Agreement. DNTA — Domain Name Transfer Agreement. DNPA — Domain Name Privacy Agreement. HTTPS_NOTICE — HTTPS notice acknowledgment for eligible TLDs. AURA — AU Domain Agreement for .au TLD registrations and transfers. CIRA — Canadian Internet Registration Authority Agreement for .ca TLD registrations and transfers.\n",
+      "type": "string"
+    },
+    "3e9571a": {
+      "title": "Agreement",
+      "description": "A legal agreement that must be accepted prior to executing a domain operation. Agreements are returned in the quote response and must be acknowledged in the execute request via the consent.agreementTypes array.\n",
+      "type": "object",
+      "required": [
+        "agreementType",
+        "title"
+      ],
+      "properties": {
+        "agreementType": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/c21d77b"
+            },
+            {
+              "description": "The type of legal agreement. Identifies which agreement text the customer must accept.\n",
+              "example": "API_DPA"
+            }
+          ]
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-readable title of the agreement, suitable for display to the customer.\n",
+          "example": "Domain Name Registration Agreement"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL to the full legal text of this agreement. Present when available.",
+          "example": "https://www.godaddy.com/agreements/showdoc?pageid=reg_sa"
+        }
+      }
+    },
+    "d7ca784": {
+      "title": "Inventory Type",
+      "description": "The inventory source for a domain name. REGISTRY — standard registry price inventory. REGISTRY_PREMIUM — registry premium tier pricing. PREMIUM — third-party premium domain marketplace.\n",
+      "type": "string",
+      "enum": [
+        "REGISTRY",
+        "REGISTRY_PREMIUM",
+        "PREMIUM"
+      ]
+    },
+    "f7542cf": {
+      "title": "Term",
+      "description": "The unit of a registration period. YEAR — registration period is expressed in years.\n",
+      "type": "string",
+      "enum": [
+        "YEAR"
+      ]
+    },
+    "0163f63": {
+      "type": "string",
+      "title": "Currency Code",
+      "description": "A three-character ISO-4217 currency code.",
+      "minLength": 3,
+      "maxLength": 3
+    },
+    "18b18ae": {
+      "type": "object",
+      "title": "Simple Money",
+      "description": "The currency and amount for a financial transaction, such as a balance or payment due. Use for value representations with default transactable-value precision.",
+      "properties": {
+        "currencyCode": {
+          "$ref": "#/x-ext/0163f63"
+        },
+        "value": {
+          "type": "integer",
+          "format": "int64",
+          "description": "The value, which might represent intergrals for currencies like `JPY` that are not typically fractional; or, with an implied decimal fraction for currencies like `TND` that are subdivided into thousandths. For the implied number of decimal places for a currency code, see [ISO-4217 Currency Codes](https://en.wikipedia.org/wiki/ISO_4217)."
+        }
+      },
+      "required": [
+        "currencyCode",
+        "value"
+      ]
+    },
+    "22cbd6e": {
+      "title": "Fee Type",
+      "description": "The type of a fee charged at the time of purchase. ONE_TIME_PREMIUM_DOMAIN_PURCHASE — one-time acquisition cost charged by the aftermarket marketplace when purchasing a premium domain.\n",
+      "type": "string"
+    },
+    "a12fb6c": {
+      "title": "Fee",
+      "description": "Fees charged at the time of purchase, separate from the registration price. The type identifies the nature of the charge.\n",
+      "type": "object",
+      "required": [
+        "type",
+        "fee"
+      ],
+      "properties": {
+        "type": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/22cbd6e"
+            },
+            {
+              "description": "Identifies the nature of this charge. Determines how the fee is categorized in pricing breakdowns and receipts.\n",
+              "example": "ONE_TIME_PREMIUM_DOMAIN_PURCHASE"
+            }
+          ]
+        },
+        "fee": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/18b18ae"
+            },
+            {
+              "description": "The monetary amount of this fee."
+            }
+          ]
+        }
+      }
+    },
+    "50f74db": {
+      "title": "Term Price",
+      "description": "Pricing for a single registration term (period and unit combination). A term is self-contained: the full cost of choosing it is price plus all fees listed here.\n",
+      "type": "object",
+      "required": [
+        "term",
+        "period",
+        "price"
+      ],
+      "properties": {
+        "term": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/f7542cf"
+            },
+            {
+              "description": "The unit of the registration period. Currently only YEAR is supported."
+            }
+          ]
+        },
+        "period": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Number of term units for this pricing entry.",
+          "example": 1
+        },
+        "price": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/18b18ae"
+            },
+            {
+              "description": "Registration price for this term and period."
+            }
+          ]
+        },
+        "renewalPrice": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/18b18ae"
+            },
+            {
+              "description": "Renewal price for this term and period. Absent when renewal pricing is unavailable or identical to the registration price.\n"
+            }
+          ]
+        },
+        "firstTermPrice": {
+          "$ref": "#/x-ext/18b18ae",
+          "description": "Discounted price of only the first term unit within this multi-unit period. Typically omitted when period is 1 (where it equals price). Present when a first-term-only promotion applies to a multi-unit period.\n",
+          "example": {
+            "currencyCode": "USD",
+            "value": 1199
+          }
+        },
+        "recommended": {
+          "type": "boolean",
+          "description": "When true, this term is the best-value option based on active discounts or promotions. At most one entry in the prices array carries this flag. Absent (not false) when no recommendation applies.\n",
+          "example": true
+        },
+        "fees": {
+          "type": "array",
+          "description": "Fees charged at the time of purchase for this term, in addition to price. Present when the domain incurs purchase fees beyond the base registration cost. The full cost of choosing this term is price plus these fees.\n",
+          "items": {
+            "$ref": "#/x-ext/a12fb6c"
+          }
+        }
+      }
+    },
+    "8ac9047": {
+      "title": "Availability",
+      "description": "The availability check result for a single requested domain. A checkable domain returns the available flag plus optional pricing. A domain that could not be checked carries an error object and no availability fields. Exactly one of available or error is present per item.\nAvailability is best-effort indicative; the authoritative availability check is performed at quote time. definitive: true means the result was confirmed directly with the registry rather than from a cached zone check.\n",
+      "type": "object",
+      "required": [
+        "domain"
+      ],
+      "properties": {
+        "domain": {
+          "type": "string",
+          "description": "The domain name checked, normalized to punycode A-label form.\n",
+          "example": "example.com"
+        },
+        "unicodeDomain": {
+          "type": "string",
+          "description": "The Unicode (U-label) form of the domain. Present only for IDN domains.\n",
+          "example": "münchen.de"
+        },
+        "available": {
+          "type": "boolean",
+          "description": "Whether this domain appears to be available for registration. Best-effort; re-verified at quote time. Present only when the domain was successfully checked (no error).\n"
+        },
+        "definitive": {
+          "type": "boolean",
+          "description": "When true, the availability result was confirmed directly with the registry (ACCURACY mode). When false, the result is from a cached zone data check (SPEED mode) and may be stale.\n"
+        },
+        "inventory": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/d7ca784"
+            },
+            {
+              "description": "The inventory source for this domain. Present when available is true and pricing fields are returned.\n",
+              "example": "REGISTRY"
+            }
+          ]
+        },
+        "prices": {
+          "type": "array",
+          "description": "Multi-term pricing for this domain. Each entry represents a different registration period (e.g. 1 year, 2 years). Present when available is true.\n",
+          "items": {
+            "$ref": "#/x-ext/50f74db"
+          }
+        },
+        "error": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/21ae8c5"
+            },
+            {
+              "description": "Present when this domain could not be checked. One of available or error is present, never both. correlationId is required and should echo the X-Request-Id header value for this request.\nCommon name values (aligned with v2 find API error codes): MISMATCH_FORMAT — the domain name does not conform to the expected format. UNSUPPORTED_TLD — the TLD is not supported for this account or check. INVALID_DOMAIN — the availcheck service reported a syntax error for this domain. ERROR_UNKNOWN — the check failed and could not be classified further.\n"
+            }
+          ]
+        }
+      }
+    },
+    "ae5973b": {
+      "title": "Optimization Target",
+      "description": "How an availability check should prioritize speed vs. authoritative accuracy. SPEED — use cached zone data for a fast response (may be slightly stale). ACCURACY — perform a live registry check for authoritative availability (higher latency).\n",
+      "type": "string",
+      "enum": [
+        "SPEED",
+        "ACCURACY"
+      ]
+    },
+    "77ae6b4": {
+      "title": "Availability Check Criteria",
+      "description": "Request body for the POST /check-availability controller. Specifies the domain names to check and optional parameters that influence how the check is performed. The response returns one Availability result per requested domain in input order.\nThis controller does not persist the check; there is no check identity or poll URL.\n",
+      "type": "object",
+      "required": [
+        "domains"
+      ],
+      "properties": {
+        "domains": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 25,
+          "items": {
+            "type": "string"
+          },
+          "description": "List of 1–25 domain names to check, in punycode A-label form for IDNs.\n",
+          "example": [
+            "example.com",
+            "example.net"
+          ]
+        },
+        "optimizeFor": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/ae5973b"
+            },
+            {
+              "default": "SPEED",
+              "description": "Optional. When omitted, defaults to SPEED. Availability is always re-verified authoritatively at quote time regardless of this setting.\n",
+              "example": "SPEED"
+            }
+          ]
+        },
+        "iscCode": {
+          "type": "string",
+          "description": "Reseller ISC (International Shopper Code) for pricing context. When provided, the indicative prices in the results reflect the applicable reseller rates for this ISC.\n",
+          "example": "ISC_PARTNER_001"
+        }
+      }
+    },
+    "37bf2ab": {
+      "description": "A date and time, in [Internet date and time format](https://tools.ietf.org/html/rfc3339#section-5.6). Note: The regular expression provides static schematic guidance but does not reject all invalid dates.",
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 64,
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[1-2][0-9]|3[0-1])[T,t]([0-1][0-9]|2[0-3]):[0-5][0-9]:([0-5][0-9]|60)([.][0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})$"
+    },
+    "2fe8a96": {
+      "title": "Consent Actor Type",
+      "description": "Who transmitted consent on behalf of the principal. DIRECT — the principal acted directly; actor is omitted. AGENT — an AI or automation acted on behalf of the principal. RESELLER — a reseller acted on behalf of a shopper.\n",
+      "type": "string"
+    },
+    "ffe7359": {
+      "title": "Consent Actor",
+      "description": "Identifies who gave consent and who transmitted it. One uniform schema for all actor types. Self-reported by the caller and treated as supplementary attestation; the server verifies principal against the resolved auth identity (OAuth token + X-Shopper-Id) and rejects with consent_principal_mismatch on disagreement. The persisted consent record is the union of this block and the verified auth context.\nprincipal identifies the account holder whose consent is being recorded. actor identifies the automated or intermediary party that transmitted the consent when different from the principal. For DIRECT, actor is omitted.\n",
+      "type": "object",
+      "x-sensitivity": "confidential",
+      "required": [
+        "type",
+        "principal"
+      ],
+      "properties": {
+        "type": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/2fe8a96"
+            },
+            {
+              "description": "Who transmitted consent relative to the principal.\n",
+              "example": "DIRECT"
+            }
+          ]
+        },
+        "principal": {
+          "type": "string",
+          "description": "The shopper or account ID whose consent is being recorded. Must match the shopper resolved from the OAuth token and X-Shopper-Id header; mismatch returns consent_principal_mismatch.\n",
+          "example": "shopper_123"
+        },
+        "actor": {
+          "type": "string",
+          "description": "The automated agent or system that transmitted the consent. Omitted for DIRECT. For AGENT, identifies the specific agent instance. For RESELLER, may identify the reseller when distinct from the OAuth token subject.\n",
+          "example": "agent:claude/atlas-1"
+        },
+        "ip": {
+          "type": "string",
+          "description": "The IP address of the principal at the time consent was expressed, if known. Optional — an absent IP with a verified principal is preferred over a fabricated one.\n",
+          "example": "203.0.113.7"
+        }
+      }
+    },
+    "fd3a330": {
+      "title": "Consent",
+      "description": "Customer consent record for a domain operation, capturing which legal agreements were accepted, which fees were acknowledged, when, and by whom. On execute, the caller supplies agreementTypes, agreedAt, and (when the quote carries fees) acknowledgedFees. The server derives agreedBy from the authenticated request context (OAuth identity, X-Shopper-Id, client IP, and transmission channel).\n",
+      "type": "object",
+      "required": [
+        "agreementTypes",
+        "agreedAt"
+      ],
+      "properties": {
+        "agreementTypes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/x-ext/c21d77b"
+          },
+          "description": "The agreement types the customer accepted. Must match the agreementType values returned in the corresponding quote's requiredAgreements array.\n",
+          "example": [
+            "API_DPA"
+          ]
+        },
+        "agreedAt": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/37bf2ab"
+            },
+            {
+              "description": "The timestamp at which the principal expressed consent. Should reflect when the customer clicked accept or confirmed the operation, not when the API call was made.\n"
+            }
+          ]
+        },
+        "acknowledgedFees": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/x-ext/a12fb6c"
+          },
+          "description": "Fees the customer explicitly acknowledged before executing the purchase.\nWhen the preceding quote's `fees` array is non-empty, this field must be present and contain the same entries verbatim (same types, amounts, and currencies). The server validates this against the locked quote token; a mismatch is rejected with `422 quote_mismatch`. This field is not in `required` because the obligation is conditional on quote state and cannot be expressed as a schema constraint — its absence is enforced at the API layer, not by validation tooling.\nContrast with `Registration.fees` (read-only): that field records what the server charged; this field records what the customer acknowledged. Both share the Fee type.\nOmit when the quote carries no purchase fees (standard REGISTRY registration).\n",
+          "example": [
+            {
+              "type": "ONE_TIME_PREMIUM_DOMAIN_PURCHASE",
+              "fee": {
+                "value": 390000,
+                "currencyCode": "USD"
+              }
+            }
+          ]
+        },
+        "agreedBy": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/ffe7359"
+            },
+            {
+              "description": "Who gave consent and how it was transmitted. Server-derived from the execute request's auth context.\n",
+              "readOnly": true
+            }
+          ]
+        }
+      }
+    },
+    "0f0d62a": {
+      "title": "DNS Record Type",
+      "description": "The DNS resource record type. A — IPv4 address record. AAAA — IPv6 address record. CNAME — canonical name alias record; not permitted at the zone apex. MX — mail exchange routing record. TXT — arbitrary text record, used for SPF, DKIM, and domain verification. NS — authoritative name server delegation record. SRV — service locator record. SOA — start of authority record. CAA — certification authority authorization record.\n",
+      "type": "string",
+      "enum": [
+        "A",
+        "AAAA",
+        "CNAME",
+        "MX",
+        "TXT",
+        "NS",
+        "SRV",
+        "SOA",
+        "CAA"
+      ]
+    },
+    "b820fe6": {
+      "title": "DNS Record",
+      "description": "A single DNS resource record within a zone.",
+      "type": "object",
+      "required": [
+        "name",
+        "type",
+        "data",
+        "ttl"
+      ],
+      "properties": {
+        "recordId": {
+          "type": "string",
+          "description": "Server-assigned identifier for this DNS record. Stable across updates.",
+          "readOnly": true,
+          "example": "rec_a1b2c3d4"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "description": "The DNS record name relative to the zone apex. Use @ to represent the zone apex itself (e.g. the bare domain example.com).\n",
+          "example": "www"
+        },
+        "type": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/0f0d62a"
+            },
+            {
+              "description": "The DNS resource record type."
+            }
+          ]
+        },
+        "data": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "description": "The record value. Format is type-specific — for example, an IPv4 address for A records, or a hostname for CNAME and MX records.\n",
+          "example": "93.184.216.34"
+        },
+        "ttl": {
+          "type": "integer",
+          "minimum": 600,
+          "maximum": 86400,
+          "description": "Time-to-live in seconds. Controls how long resolvers cache this record.",
+          "example": 3600
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "Priority value for MX and SRV records. Lower values are preferred."
+        },
+        "service": {
+          "type": "string",
+          "description": "Service label for SRV records (e.g. _http)."
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "Port number for SRV records."
+        },
+        "weight": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "Weight for SRV load balancing among records with equal priority. Higher weight increases the probability of selection.\n"
+        },
+        "protocol": {
+          "type": "string",
+          "description": "Protocol identifier for SRV records (e.g. _tcp, _udp)."
+        },
+        "flag": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255,
+          "description": "Flag byte for CAA records. 0 indicates non-critical; 128 indicates critical (the issuer must understand the tag property to proceed).\n"
+        },
+        "tag": {
+          "type": "string",
+          "description": "Tag property for CAA records. Common values: issue, issuewild, iodef.\n"
+        }
+      }
+    },
+    "e0e1d47": {
+      "title": "DNS Records",
+      "description": "Paginated collection of DNS resource records for a zone. HATEOAS links provide navigation to adjacent pages.\n",
+      "type": "object",
+      "required": [
+        "items",
+        "links"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "description": "DNS records for the current page.",
+          "items": {
+            "$ref": "#/x-ext/b820fe6"
+          }
+        },
+        "totalItems": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Total number of records in the zone. Only present when totalRequired=true was passed in the request and the zone contains at least one record.\n"
+        },
+        "totalPages": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Total number of pages at the requested pageSize. Only present under the same conditions as totalItems.\n"
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "$ref": "#/x-ext/590647a"
+          },
+          "description": "HATEOAS pagination links. rel=self — this page. rel=next — next page (absent on the last page). rel=prev — previous page (absent on the first page).\n",
+          "readOnly": true
+        }
+      }
+    },
+    "bf9c5f0": {
+      "title": "Nameserver Hostname",
+      "description": "A fully qualified domain name for an authoritative nameserver.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "example": "ns1.domaincontrol.com"
+    },
+    "26eb9a5": {
+      "title": "Name Servers",
+      "description": "Ordered list of authoritative nameserver hostnames for a domain. The first entry is primary; subsequent entries are secondaries. A minimum of two nameservers is required; the maximum is thirteen.\n",
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 13,
+      "items": {
+        "$ref": "#/x-ext/bf9c5f0"
+      },
+      "example": [
+        "ns1.domaincontrol.com",
+        "ns2.domaincontrol.com"
+      ]
+    },
+    "b594312": {
+      "title": "Domain Status",
+      "description": "The lifecycle state of a registered domain. ACTIVE — domain is registered and resolving normally. EXPIRED — domain has passed its expiration date; renewal still possible during the grace period. CANCELLED — domain registration has been cancelled and released. CANCELLED_REDEEMABLE — cancelled domain still within the redemption grace period. PENDING_TRANSFER — inbound transfer from another registrar is in progress. TRANSFERRED_OUT — domain was transferred to another registrar. LOCKED — domain has a registry-level administrative lock applied.\n",
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "EXPIRED",
+        "CANCELLED",
+        "CANCELLED_REDEEMABLE",
+        "PENDING_TRANSFER",
+        "TRANSFERRED_OUT",
+        "LOCKED"
+      ]
+    },
+    "7244d8c": {
+      "title": "Domain",
+      "description": "Full management state for a registered domain owned by the authenticated account. Includes registration metadata, expiration timestamps, lifecycle settings, current nameservers, and HATEOAS links for sub-resource navigation.\n",
+      "type": "object",
+      "required": [
+        "domain",
+        "status",
+        "expiresAt",
+        "createdAt",
+        "autoRenew",
+        "privacy"
+      ],
+      "properties": {
+        "domain": {
+          "type": "string",
+          "description": "The domain name in punycode A-label form.",
+          "readOnly": true,
+          "example": "example.com"
+        },
+        "idnDomain": {
+          "type": "string",
+          "description": "The internationalized (U-label) representation of the domain name. Only present for internationalized domain names (IDNs).\n",
+          "readOnly": true,
+          "example": "例え.jp"
+        },
+        "status": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/b594312"
+            },
+            {
+              "description": "Current lifecycle state of the domain.",
+              "readOnly": true
+            }
+          ]
+        },
+        "expiresAt": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/37bf2ab"
+            },
+            {
+              "description": "Timestamp when the domain registration expires.",
+              "readOnly": true
+            }
+          ]
+        },
+        "createdAt": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/37bf2ab"
+            },
+            {
+              "description": "Timestamp when the domain was originally registered at GoDaddy.",
+              "readOnly": true
+            }
+          ]
+        },
+        "renewBy": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/37bf2ab"
+            },
+            {
+              "description": "Deadline by which the domain must be renewed to avoid expiration consequences. May precede expiresAt due to registry-specific renewal windows.\n",
+              "readOnly": true
+            }
+          ]
+        },
+        "updatedAt": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/37bf2ab"
+            },
+            {
+              "description": "Timestamp of the most recent management state change.",
+              "readOnly": true
+            }
+          ]
+        },
+        "autoRenew": {
+          "type": "boolean",
+          "description": "Whether the domain will be renewed automatically before expiration."
+        },
+        "privacy": {
+          "type": "boolean",
+          "description": "Whether WHOIS privacy protection is currently enabled on the domain."
+        },
+        "transferLock": {
+          "type": "boolean",
+          "description": "Whether the registry transfer-lock (clientTransferProhibited) is engaged. When true, outbound transfers to another registrar are blocked at the registry.\n",
+          "readOnly": true
+        },
+        "nameServers": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/26eb9a5"
+            },
+            {
+              "description": "Current authoritative nameservers for this domain.",
+              "example": [
+                "ns1.domaincontrol.com",
+                "ns2.domaincontrol.com"
+              ]
+            }
+          ]
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "$ref": "#/x-ext/590647a"
+          },
+          "description": "HATEOAS links for domain sub-resources. rel=self — canonical URL for this domain resource. rel=nameservers — nameserver management sub-resource. rel=contacts — contact management sub-resource. rel=privacy — privacy toggle sub-resource.\n",
+          "readOnly": true
+        }
+      }
+    },
+    "e16f6a6": {
+      "title": "Domain Operation Type",
+      "description": "The type of asynchronous domain operation. Used to distinguish which workflow is being polled on the /operations/{operationId} endpoint. REGISTER — new domain registration.\n",
+      "type": "string"
+    },
+    "a701138": {
+      "title": "Domain Operation Status",
+      "description": "The execution state of an asynchronous domain operation. CONFIRMED — operation has been accepted and is queued for execution. EXECUTING — operation is actively being processed by the registry or downstream systems. COMPLETED — operation finished successfully; result data is available. FAILED — operation terminated with an unrecoverable error; error detail is attached.\n",
+      "type": "string"
+    },
+    "3becb0e": {
+      "title": "Domain Operation Result",
+      "description": "The terminal success payload for a completed domain operation. Returned on the parent DomainOperation when status is COMPLETED. Absent for non-terminal statuses (CONFIRMED, EXECUTING) and for FAILED operations.\nOnce status reaches COMPLETED it is terminal: result is populated, remains available on subsequent polls, and status does not revert. Interpret the fields present in result using the parent operation's type:\nREGISTER — expiresAt, orderId.\n",
+      "type": "object",
+      "readOnly": true,
+      "properties": {
+        "expiresAt": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/37bf2ab"
+            },
+            {
+              "description": "New domain expiry date. Present for REGISTER and RENEW operations.\n"
+            }
+          ]
+        },
+        "orderId": {
+          "type": "string",
+          "description": "The commerce order ID associated with the charge. Present for commercial operations (REGISTER, RENEW, TRANSFER_IN).\n",
+          "example": "ord_abc123"
+        },
+        "updatedAt": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/37bf2ab"
+            },
+            {
+              "description": "Timestamp of the completed non-commercial mutation.\n"
+            }
+          ]
+        }
+      }
+    },
+    "51563a3": {
+      "title": "Domain Operation",
+      "description": "The abstract operation envelope for all domain mutations, returned by the universal GET /operations/{operationId} endpoint. Concrete specializations — Registration, Renewal, and Transfer — are returned directly by their respective POST endpoints and carry the same operationId. Developers who do not need the abstract view can poll the concrete resource (GET /registrations/{id}, etc.) and ignore this type entirely.\nOperation IDs are unique across all concrete types, so either poll path works for any given operation.\nAsync state machine:\n  status tracks where the operation is in its lifecycle. Non-terminal values\n  (CONFIRMED, EXECUTING) are transient — poll until a terminal value is reached.\n  result and error are mutually exclusive terminal payloads:\n    COMPLETED — operation succeeded; result contains the final outcome data.\n    FAILED — operation terminated; error contains failure detail.\n  Neither result nor error is present while status is non-terminal.\n",
+      "type": "object",
+      "required": [
+        "operationId",
+        "type",
+        "status"
+      ],
+      "properties": {
+        "operationId": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/e6ced4f"
+            },
+            {
+              "description": "Stable, server-assigned identifier for this operation. Unique across all operation types. Use to poll GET /operations/{operationId}. Matches the operationId on the corresponding concrete resource (e.g. Registration).\n",
+              "readOnly": true,
+              "example": "9f1c2e7a-4b3d-4e8f-a1c2-3d4e5f6a7b8c"
+            }
+          ]
+        },
+        "type": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/e16f6a6"
+            },
+            {
+              "description": "The type of operation being tracked. Determines which fields appear in result on COMPLETED and the concrete resource collection (REGISTER → /registrations, RENEW → /renewals, TRANSFER_IN → /transfers).\n",
+              "readOnly": true
+            }
+          ]
+        },
+        "domain": {
+          "type": "string",
+          "description": "The domain name this operation applies to.",
+          "readOnly": true,
+          "example": "example.com"
+        },
+        "status": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/a701138"
+            },
+            {
+              "description": "Current position in the operation lifecycle. Poll until COMPLETED or FAILED. Non-terminal while CONFIRMED or EXECUTING; terminal values are mutually exclusive with each other and do not revert.\n",
+              "readOnly": true
+            }
+          ]
+        },
+        "result": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/3becb0e"
+            },
+            {
+              "description": "Present when status is COMPLETED. Absent while non-terminal and when status is FAILED.\n"
+            }
+          ],
+          "readOnly": true
+        },
+        "error": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/21ae8c5"
+            },
+            {
+              "description": "Present when status is FAILED. Absent while non-terminal and when status is COMPLETED.\n"
+            }
+          ],
+          "readOnly": true
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "$ref": "#/x-ext/590647a"
+          },
+          "description": "HATEOAS link relations for this operation. rel=self — the canonical URL for this abstract operation view. rel=registration, rel=renewal, or rel=transfer — the same resource viewed through its concrete typed collection. rel=domain — the domain-name resource affected by this operation.\n",
+          "readOnly": true
+        },
+        "createdAt": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/37bf2ab"
+            },
+            {
+              "description": "Timestamp when this operation was created.",
+              "readOnly": true
+            }
+          ]
+        },
+        "updatedAt": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/37bf2ab"
+            },
+            {
+              "description": "Timestamp of the most recent status update.",
+              "readOnly": true
+            }
+          ]
+        }
+      }
+    },
+    "4945a71": {
+      "description": "A valid, internationalized email address. Note: Up to 64 characters are allowed before and 255 characters are allowed after the @ sign. However, the generally accepted maximum length for an email address is 254 characters. The pattern verifies that an unquoted @ sign exists.",
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 254,
+      "pattern": "^.+@[^\"\\-].+$"
+    },
+    "31009c4": {
+      "type": "object",
+      "title": "Phone",
+      "description": "The phone number, in its canonical international [E.164 numbering plan format](https://www.itu.int/rec/T-REC-E.164/en).",
+      "properties": {
+        "countryCode": {
+          "type": "string",
+          "description": "The country calling code (CC), in its canonical international [E.164 numbering plan format](https://www.itu.int/rec/T-REC-E.164/en). The combined length of the CC and the national number must not be greater than 15 digits. The national number consists of a national destination code (NDC) and subscriber number (SN).",
+          "minLength": 1,
+          "maxLength": 3,
+          "pattern": "^[0-9]{1,3}?$"
+        },
+        "nationalNumber": {
+          "type": "string",
+          "description": "The national number, in its canonical international [E.164 numbering plan format](https://www.itu.int/rec/T-REC-E.164/en). The combined length of the country calling code (CC) and the national number must not be greater than 15 digits. The national number consists of a national destination code (NDC) and subscriber number (SN).",
+          "minLength": 1,
+          "maxLength": 14,
+          "pattern": "^[0-9]{1,14}?$"
+        },
+        "extensionNumber": {
+          "type": "string",
+          "description": "The extension number.",
+          "minLength": 1,
+          "maxLength": 15,
+          "pattern": "^[0-9]{1,15}?$"
+        }
+      },
+      "required": [
+        "countryCode",
+        "nationalNumber"
+      ]
+    },
+    "56f80e0": {
+      "description": "A two-character ISO 3166-1 code that identifies the country or region.",
+      "type": "string",
+      "maxLength": 2,
+      "minLength": 2,
+      "pattern": "^([A-Z]{2}|C2)$"
+    },
+    "20f26ae": {
+      "type": "object",
+      "title": "Simple Postal Address (Coarse-Grained)",
+      "description": "Simple postal address with coarse-grained fields. Do not use for international postal addresses. Use for backward compatibility only. Address does not contain a phone number.",
+      "properties": {
+        "line1": {
+          "type": "string",
+          "description": "The first line of the address. For example, number or street.",
+          "maxLength": 300
+        },
+        "line2": {
+          "type": "string",
+          "description": "The second line of the address. For example, suite or apartment number.",
+          "maxLength": 300
+        },
+        "city": {
+          "type": "string",
+          "description": "The city name.",
+          "maxLength": 300
+        },
+        "state": {
+          "type": "string",
+          "description": "The [code](https://about.usps.com/who/profile/history/state-abbreviations.htm) for a US state or the equivalent for other countries.",
+          "maxLength": 300
+        },
+        "countryCode": {
+          "$ref": "#/x-ext/56f80e0",
+          "description": "The [two-character ISO 3166-1 code](https://en.wikipedia.org/wiki/ISO_3166-1) that identifies the country or region. Note: The country code for Great Britain is `GB` and not `UK` as used in the top-level domain names for that country. Use country code `C2` for China for comparable uncontrolled price (CUP) method, bank-card, and cross-border transactions."
+        },
+        "postalCode": {
+          "type": "string",
+          "description": "The postal code, which is the zip code or equivalent. Typically required for countries that have a postal code or an equivalent. See [Postal Code](https://en.wikipedia.org/wiki/Postal_code).",
+          "maxLength": 60
+        }
+      },
+      "required": [
+        "line1",
+        "city",
+        "countryCode"
+      ]
+    },
+    "c8dda8d": {
+      "title": "Contact",
+      "description": "An ICANN-required contact record for a domain registration. Covers registrant, administrative, technical, and billing roles. Identity fields are validated at registration-profile save time.\n",
+      "x-sensitivity": "confidential",
+      "type": "object",
+      "required": [
+        "firstName",
+        "lastName",
+        "email",
+        "phone",
+        "address"
+      ],
+      "properties": {
+        "firstName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "The contact's first (given) name.",
+          "x-sensitivity": "confidential",
+          "example": "Jane"
+        },
+        "lastName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "The contact's last (family) name.",
+          "x-sensitivity": "confidential",
+          "example": "Smith"
+        },
+        "organization": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Organization or company name. Required for contacts acting on behalf of a legal entity. Leave blank for individual registrants.\n",
+          "x-sensitivity": "confidential",
+          "example": "Example LLC"
+        },
+        "email": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/4945a71"
+            },
+            {
+              "example": "foo@bar.com"
+            },
+            {
+              "description": "The contact's email address. Used for registry WHOIS and renewal notifications.\n",
+              "x-sensitivity": "confidential"
+            }
+          ]
+        },
+        "phone": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/31009c4"
+            },
+            {
+              "example": {
+                "countryCode": "1",
+                "nationalNumber": "4805551234"
+              }
+            },
+            {
+              "description": "The contact's phone number. Pass as an object with `countryCode` (E.164 country calling code digits, e.g. `\"1\"` for the US) and `nationalNumber` (national number digits without formatting, e.g. `\"4805551234\"`). Required by ICANN for all contact roles.\n",
+              "x-sensitivity": "confidential"
+            }
+          ]
+        },
+        "address": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/20f26ae"
+            },
+            {
+              "description": "The contact's mailing address for WHOIS and ICANN records.\n",
+              "x-sensitivity": "confidential"
+            }
+          ]
+        }
+      }
+    },
+    "67999d5": {
+      "title": "Contacts",
+      "description": "The set of ICANN-required contact roles for a domain registration. Registrant is required; admin, tech, and billing cascade from the registrant when omitted. Merge rule across resolution layers (saved profile, inline registration profile): identity fields replace as a whole block per role.\n",
+      "x-sensitivity": "confidential",
+      "type": "object",
+      "required": [
+        "registrant"
+      ],
+      "properties": {
+        "registrant": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/c8dda8d"
+            },
+            {
+              "description": "The legal owner of the domain. Required. The registrant's identity is the authoritative WHOIS record and is bound by ICANN registration agreements.\n"
+            }
+          ]
+        },
+        "admin": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/c8dda8d"
+            },
+            {
+              "description": "The administrative contact, responsible for managing the domain on behalf of the registrant. Cascades from registrant when omitted.\n"
+            }
+          ]
+        },
+        "tech": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/c8dda8d"
+            },
+            {
+              "description": "The technical contact, responsible for DNS and nameserver configuration. Cascades from registrant when omitted.\n"
+            }
+          ]
+        },
+        "billing": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/c8dda8d"
+            },
+            {
+              "description": "The billing contact, receives invoices and renewal notices. Cascades from registrant when omitted.\n"
+            }
+          ]
+        }
+      }
+    },
+    "c521303": {
+      "title": "Inline Registration Profile",
+      "description": "A one-time, non-persisted set of contacts and purchase preference defaults supplied inline on a quote or execute request. Use to provide registration data for this transaction without creating or updating a saved registration profile.\nShared by the registration quote and execute request bodies. Every field is optional. Omitted fields account identity or other default values. Provided fields override only what is supplied — contact roles replace as a whole block; preference fields replace individually.\nThis is not a saved registration profile and is not JSON Patch. Data here applies only to the current quote or registration request.\n",
+      "type": "object",
+      "properties": {
+        "contacts": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/67999d5"
+            },
+            {
+              "description": "Contact records for this request. Each role provided replaces that role from the resolved saved profile or account identity. Omitted roles continue to resolve from the saved profile or cascade from registrant.\n"
+            }
+          ]
+        },
+        "autoRenew": {
+          "type": "boolean",
+          "description": "Auto-renew preference for this registration. Omit to inherit from the resolved saved profile or account defaults.\n"
+        },
+        "privacy": {
+          "type": "boolean",
+          "description": "WHOIS privacy preference for this registration. Omit to inherit from the resolved saved profile or account defaults.\n"
+        },
+        "nameServers": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 13,
+          "items": {
+            "type": "string",
+            "description": "Fully-qualified nameserver hostname."
+          },
+          "description": "Authoritative nameservers for this registration. Omit to inherit from the resolved saved profile or platform defaults.\n",
+          "example": [
+            "ns1.example.com",
+            "ns2.example.com"
+          ]
+        }
+      }
+    },
+    "a83bac3": {
+      "title": "Registration",
+      "description": "A domain registration entity created when a POST /registrations request is accepted. Registrations are a top-level resource with their own stable registrationId; the domain relationship is captured in the representation.\nOn POST /registrations, supply the writable fields (domain, period, quoteToken, consent, and optionally profileId/profile). The server returns the full Registration with readOnly fields populated. Poll links[rel=self] until status reaches COMPLETED or FAILED. The same resource is also reachable via GET /operations/{operationId} for clients operating at the abstract level; operationId is included in the representation for that purpose.\n",
+      "type": "object",
+      "required": [
+        "domain",
+        "quoteToken",
+        "consent"
+      ],
+      "properties": {
+        "registrationId": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/e6ced4f"
+            },
+            {
+              "description": "Server-assigned stable identifier for this registration record.\n",
+              "readOnly": true
+            }
+          ]
+        },
+        "domain": {
+          "type": "string",
+          "description": "The domain name to register, in punycode A-label form for IDNs. Must match the domain in the quoteToken.\n",
+          "example": "example.com"
+        },
+        "period": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 1,
+          "description": "Registration period in years. Must match the period in the quote.",
+          "example": 1
+        },
+        "profileId": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/e6ced4f"
+            },
+            {
+              "description": "ID of a saved registration profile to use for contacts and preference defaults. Omit to fall back to the account-default profile for the domain's TLD, then to account identity.\n"
+            }
+          ]
+        },
+        "profile": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/c521303"
+            },
+            {
+              "description": "One-time inline contacts and purchase preference defaults for this registration. Not persisted. Must match the profile supplied on the quote when a profile was included at quote time.\n"
+            }
+          ]
+        },
+        "quoteToken": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/e6ced4f"
+            },
+            {
+              "description": "The single-use opaque token from the preceding quoteDomainRegistration call. Required. Consumed on first successful execution; idempotent retries with the same Idempotency-Key replay the original operation without re-consuming.\n",
+              "writeOnly": true,
+              "example": "7f3a2b1c-9d8e-4012-a5b6-c1d2e3f4a5b6"
+            }
+          ]
+        },
+        "consent": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/fd3a330"
+            },
+            {
+              "description": "The customer's consent record for the legal agreements returned in the quote. Must reference the same agreementTypes as the quote.\n"
+            }
+          ]
+        },
+        "price": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/18b18ae"
+            },
+            {
+              "description": "The locked registration price for the quoted period. Held for the duration of the quoteToken's TTL. Total amount charged on execute is this price plus any fees on this registration.\n",
+              "readOnly": true
+            }
+          ]
+        },
+        "fees": {
+          "type": "array",
+          "description": "Fees charged at the time of purchase, in addition to the registration price. Present when purchase fees were incurred. Same fees as RegistrationQuote.fees (the selected term's TermPrice.fees) from the preceding quote.\n",
+          "items": {
+            "$ref": "#/x-ext/a12fb6c"
+          },
+          "readOnly": true
+        },
+        "status": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/a701138"
+            },
+            {
+              "description": "Current execution status of this registration.",
+              "readOnly": true
+            }
+          ]
+        },
+        "operationId": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/e6ced4f"
+            },
+            {
+              "description": "Identifier of the DomainOperation tracking this registration. Same value returned by GET /operations/{operationId} for abstract operation tracking.\n",
+              "readOnly": true,
+              "example": "9f1c2e7a-4b3d-4e8f-a1c2-3d4e5f6a7b8c"
+            }
+          ]
+        },
+        "expiresAt": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/37bf2ab"
+            },
+            {
+              "description": "The domain's expiry date once the registration completes. Present only when status is COMPLETED.\n",
+              "readOnly": true
+            }
+          ]
+        },
+        "createdAt": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/37bf2ab"
+            },
+            {
+              "description": "Timestamp when this registration was initiated.",
+              "readOnly": true
+            }
+          ]
+        },
+        "updatedAt": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/37bf2ab"
+            },
+            {
+              "description": "Timestamp of the most recent status update.",
+              "readOnly": true
+            }
+          ]
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "$ref": "#/x-ext/590647a"
+          },
+          "description": "HATEOAS link relations for this registration. rel=self — the canonical URL for this registration record. rel=domain — the registered domain-name resource once the registration is complete.\n",
+          "readOnly": true
+        }
+      }
+    },
+    "a114951": {
+      "title": "Contact Source",
+      "description": "Where the resolved registrant contact came from. INLINE — contact was supplied via an inline registration profile on the request. PROFILE — contact was resolved from a named or default saved profile. ACCOUNT — contact was derived from the authenticated principal's account identity (no profile supplied or on file).\n",
+      "type": "string",
+      "enum": [
+        "INLINE",
+        "PROFILE",
+        "ACCOUNT"
+      ]
+    },
+    "51108fa": {
+      "title": "Resolved Settings",
+      "description": "A preview of the effective settings that will be applied if the associated quote is executed. Returned in the quote response to eliminate invisible side effects — the caller sees exactly whose contact info and which preferences will be used before making a commitment. contactSource names where the registrant contact came from so an agent can be explicit at the confirmation step.\n",
+      "type": "object",
+      "properties": {
+        "profileId": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/e6ced4f"
+            },
+            {
+              "description": "The saved registration profile that was applied, if any. Absent when the registrant was derived from account identity.\n",
+              "readOnly": true,
+              "example": "14514a29-5fce-4624-8d8a-d8abd56015e2"
+            }
+          ]
+        },
+        "contactSource": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/a114951"
+            },
+            {
+              "description": "Indicates where the resolved registrant contact came from. When ACCOUNT, the agent should surface this clearly to the customer before confirmation.\n",
+              "example": "PROFILE"
+            }
+          ]
+        },
+        "registrantSummary": {
+          "type": "string",
+          "description": "A human-readable one-line summary of the resolved registrant, suitable for display in a confirmation prompt. When contactSource is ACCOUNT, the summary is suffixed with \"(account identity)\" to make the derivation explicit.\n",
+          "x-sensitivity": "confidential",
+          "example": "Jane Smith / jane@example.com"
+        },
+        "autoRenew": {
+          "type": "boolean",
+          "description": "The effective auto-renew setting that will be applied upon registration.\n"
+        },
+        "privacy": {
+          "type": "boolean",
+          "description": "The effective WHOIS privacy setting that will be applied upon registration.\n"
+        },
+        "nameServers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "Fully-qualified nameserver hostname."
+          },
+          "description": "The effective nameservers that will be provisioned for the domain.\n",
+          "example": [
+            "ns01.domaincontrol.com",
+            "ns02.domaincontrol.com"
+          ]
+        }
+      }
+    },
+    "f64cd91": {
+      "title": "Registration Quote",
+      "description": "A price quote for registering a single domain. Contains a locked price, resolved contact and preference settings, required legal agreements, and a short-lived single-use quoteToken that must be presented on the subsequent registration execute call. Execution without a valid quoteToken is structurally impossible.\nWhen available is false, no quoteToken is returned — this is not an error; it means the domain cannot be registered as requested.\n",
+      "type": "object",
+      "required": [
+        "domain",
+        "available"
+      ],
+      "properties": {
+        "quoteToken": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/e6ced4f"
+            },
+            {
+              "description": "Opaque, single-use token with a 10-minute TTL. References the locked price, a hash of this request body, and a hash of the resolved profile values. Absent when available is false. Treat as a capability; do not parse.\n",
+              "example": "7f3a2b1c-9d8e-4012-a5b6-c1d2e3f4a5b6"
+            }
+          ]
+        },
+        "expiresAt": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/37bf2ab"
+            },
+            {
+              "description": "The expiry timestamp of the quoteToken. After this time, presenting the token on execute returns quote_expired and a new quote must be obtained.\n"
+            }
+          ]
+        },
+        "domain": {
+          "type": "string",
+          "description": "The domain name being quoted, in punycode A-label form for IDNs.\n",
+          "example": "example.com"
+        },
+        "available": {
+          "type": "boolean",
+          "description": "Whether the domain is available for registration. When false, no quoteToken is returned. The availability check at quote time is authoritative; a name sniped between suggest/availability and quote fails cleanly here.\n"
+        },
+        "price": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/18b18ae"
+            },
+            {
+              "description": "The locked registration price for the quoted period. Held for the duration of the quoteToken's TTL. Total amount charged on execute is this price plus any fees on this quote.\n"
+            }
+          ]
+        },
+        "renewalPrice": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/18b18ae"
+            },
+            {
+              "description": "Indicative renewal cost at current rates. Not a price guarantee; renewal pricing is locked at time of renewal quote.\n"
+            }
+          ]
+        },
+        "period": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Registration period in years for which the price is quoted.",
+          "example": 1
+        },
+        "resolved": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/51108fa"
+            },
+            {
+              "description": "The effective contact and preference settings that will be applied on execute. Review before execute to verify registrant, contacts, and preferences match intent.\n"
+            }
+          ]
+        },
+        "requiredAgreements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/x-ext/3e9571a"
+          },
+          "description": "Legal agreements that must be accepted before executing this quote. The agreementType values from this list must be included in the execute request's consent object.\n"
+        },
+        "irreversible": {
+          "type": "boolean",
+          "description": "Whether executing this quote is irreversible once accepted. Use to calibrate the explicitness of any confirmation step presented before execute.\n",
+          "example": false
+        },
+        "inventory": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/d7ca784"
+            },
+            {
+              "description": "The inventory type of the quoted domain. Present when available is true.\n",
+              "readOnly": true
+            }
+          ]
+        },
+        "fees": {
+          "type": "array",
+          "description": "Fees charged at the time of purchase, in addition to the registration price. Present when the domain incurs purchase fees beyond the base registration cost.\nThese are the same fees as TermPrice.fees for the selected term (this quote's period) — not a separate term-independent fee list and not additional to term-level fees. Execute cost is price plus this array. Mirrored on Registration.fees after execute.\n",
+          "items": {
+            "$ref": "#/x-ext/a12fb6c"
+          }
+        }
+      }
+    },
+    "a4552e9": {
+      "title": "Suggestion",
+      "description": "A single available domain suggestion returned by the suggest endpoint. Availability is implied by presence in the results (available-only contract) and is best-effort — the availability check at quote time is the authoritative re-check. Indicative pricing may be stale; the locked price is established at quote time only.\n",
+      "type": "object",
+      "required": [
+        "domain"
+      ],
+      "properties": {
+        "domain": {
+          "type": "string",
+          "description": "The suggested domain name in punycode A-label form.\n",
+          "example": "sunrisebakery.com"
+        },
+        "prices": {
+          "type": "array",
+          "description": "Multi-term pricing for this suggestion. Each entry represents a different registration period. Indicative only — the locked price is established at quote time.\n",
+          "items": {
+            "$ref": "#/x-ext/50f74db"
+          }
+        },
+        "inventory": {
+          "allOf": [
+            {
+              "$ref": "#/x-ext/d7ca784"
+            },
+            {
+              "description": "The inventory source for this domain. Present when pricing fields are present.\n",
+              "example": "REGISTRY"
+            }
+          ]
+        }
+      }
+    },
+    "0dbf450": {
+      "title": "DomainCollection",
+      "description": "A paginated collection of registered domains owned by the authenticated account. Supports filtering by status and cursor-based pagination.\n",
+      "type": "object",
+      "required": [
+        "items",
+        "links"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "description": "Domains for the current page.",
+          "items": {
+            "$ref": "#/x-ext/7244d8c"
+          }
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "$ref": "#/x-ext/590647a"
+          },
+          "description": "HATEOAS pagination links. May include rel=self (current page),  rel=prev is present when more items are available before the current page. and rel=next is present when more items are available beyond the current page.\n",
+          "readOnly": true
+        }
+      }
+    },
+    "847c074": {
+      "title": "Domain Lifecycle Group",
+      "description": "A logical grouping of domain lifecycle statuses for filtering purposes. PENDING — domain setup is in progress (e.g. PENDING_REGISTRATION). REGISTERED — domain is actively registered and operational (e.g. ACTIVE, PARKED). PENDING_TERMINAL — domain is approaching a terminal state (e.g. PENDING_TRANSFER, EXPIRED). TERMINAL — domain has reached a terminal state and is no longer manageable (e.g. CANCELLED, DELETED_REDEEMABLE, TRANSFERRED, REPOSSESSED).\n",
+      "type": "string",
+      "examples": [
+        "PENDING",
+        "REGISTERED",
+        "PENDING_TERMINAL",
+        "TERMINAL"
+      ]
+    },
+    "6d77c8e": {
+      "title": "Suggestion Source",
+      "description": "A suggestion source strategy that generates domain name variations. EXTENSION — vary the TLD. KEYWORD_SPIN — rotate keywords. CC_TLD — vary using country-code TLDs. PREMIUM — include premium-priced variations.\n",
+      "type": "string",
+      "enum": [
+        "CC_TLD",
+        "EXTENSION",
+        "KEYWORD_SPIN",
+        "PREMIUM"
+      ]
+    }
+  }
+}

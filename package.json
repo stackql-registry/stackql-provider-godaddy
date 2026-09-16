@@ -1,28 +1,41 @@
 {
-  "name": "stackql-provider-digitalocean",
-  "version": "0.1.0",
-  "description": "StackQL Provider for Digital Ocean",
+  "name": "stackql-provider-godaddy",
+  "version": "0.2.0",
+  "description": "StackQL Provider for GoDaddy",
   "type": "module",
   "scripts": {
-    "generate-docs": "./bin/generate-docs.sh",
-    "split": "./bin/split.sh",
-    "generate-mappings": "./bin/generate-mappings.sh",
-    "generate-provider": "./bin/generate-provider.sh",
+    "fetch-spec": "bash ./bin/fetch-spec.sh",
+    "split": "node ./bin/split.mjs",
+    "generate-mappings": "node ./node_modules/@stackql/provider-utils/bin/provider-dev-utils.mjs analyze",
+    "map-operations": "node ./provider-dev/scripts/map_operations.mjs",
+    "pre-normalize": "node ./provider-dev/scripts/pre_normalize.mjs",
+    "normalize": "node ./node_modules/@stackql/provider-utils/bin/provider-dev-utils.mjs normalize",
+    "post-normalize": "node ./provider-dev/scripts/post_normalize.mjs",
+    "generate-provider": "node ./node_modules/@stackql/provider-utils/bin/provider-dev-utils.mjs generate",
+    "post-process": "node ./provider-dev/scripts/post_process.mjs",
+    "generate-docs": "node ./node_modules/@stackql/provider-utils/bin/docgen-utils.mjs generate-docs",
     "start-server": "bash ./bin/start-server.sh",
     "stop-server": "bash ./bin/stop-server.sh",
     "server-status": "bash ./bin/server-status.sh",
-    "test-meta-routes": "node ./bin/test-meta-routes.cjs"
+    "test-meta-routes": "node ./bin/test-meta-routes.cjs",
+    "test-offline": "node ./tests/offline_validation.mjs",
+    "test-integration": "node ./tests/integration/run_integration_tests.mjs"
   },
   "dependencies": {
-    "@stackql/pgwire-lite": "^1.0.1",
-    "@stackql/provider-utils": "^0.4.6"
+    "@apidevtools/swagger-parser": "^12.1.0",
+    "@stackql/pgwire-lite": "^1.0.2",
+    "@stackql/provider-utils": "^0.7.9",
+    "js-yaml": "^4.1.0",
+    "pluralize": "^8.0.0"
   },
   "keywords": [
     "stackql",
-    "digitalocean",
+    "godaddy",
+    "domains",
+    "dns",
     "provider"
   ],
   "engines": {
-    "node": ">=14.16.0"
+    "node": ">=20.0.0"
   }
 }

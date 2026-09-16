@@ -4,83 +4,316 @@ hide_title: false
 hide_table_of_contents: false
 keywords:
   - godaddy
+  - domains
+  - dns
   - stackql
   - infrastructure-as-code
   - configuration-as-data
   - cloud inventory
-description: Query, deploy and manage GoDaddy resources using SQL
+description: Query, deploy and manage GoDaddy domains and DNS using SQL
 custom_edit_url: null
-image: /img/providers/godaddy/stackql-godaddy-provider-featured-image.png
+image: /img/stackql-godaddy-provider-featured-image.png
 id: 'provider-intro'
 ---
 
 import CopyableCode from '@site/src/components/CopyableCode/CopyableCode';
 
-Domain registration and web hosting services.
+Domain registration, domain lifecycle management and DNS from GoDaddy, through the GoDaddy Domains APIs (v1, v2 and v3) on the GoDaddy Developer Platform.
+
 
 :::info[Provider Summary] 
 
-total services: __9__  
-total resources: __29__  
+total services: __4__  
+total resources: __32__  
 
 :::
 
-See also:   
+See also:
 [[` SHOW `]](https://stackql.io/docs/language-spec/show) [[` DESCRIBE `]](https://stackql.io/docs/language-spec/describe)  [[` REGISTRY `]](https://stackql.io/docs/language-spec/registry)
-* * * 
+* * *
 
 ## Installation
 
-To pull the latest version of the `godaddy` provider, run the following command:  
+To pull the latest version of the `godaddy` provider, run the following command:
 
 ```bash
 REGISTRY PULL godaddy;
 ```
-> To view previous provider versions or to pull a specific provider version, see [here](https://stackql.io/docs/language-spec/registry).  
+> To view previous provider versions or to pull a specific provider version, see [here](https://stackql.io/docs/language-spec/registry).
 
 ## Authentication
 
-The following system environment variables are used for authentication by default:  
+The provider authenticates with a GoDaddy Personal Access Token (PAT), sent as a bearer token. Create one on the [GoDaddy Developer Platform](https://developer.godaddy.com/personal-access-token) with the scopes the queries need (`domains.domain:read` for inventory queries, `domains.dns:update` for DNS changes, `domains.domain:update` and `domains.nameserver:update` for domain settings, `domains.domain:create` for registration), then export it:
 
-- <CopyableCode code="GODADDY_API_KEY" /> - Godaddy API key (see <a href="https://developer.godaddy.com/keys">Creating a Godaddy API Key</a>)
-  
-These variables are sourced at runtime (from the local machine or as CI variables/secrets).  
+- <CopyableCode code="GODADDY_API_KEY" /> - the Personal Access Token
+
+```bash
+export GODADDY_API_KEY='gd_...'
+```
+
+or using PowerShell:
+
+```powershell
+$env:GODADDY_API_KEY = 'gd_...'
+```
+
+This variable is sourced at runtime (from the local machine or as a CI variable/secret).
 
 <details>
 
-<summary>Using different environment variables</summary>
+<summary>Classic Developer Key (sso-key)</summary>
 
-To use different environment variables (instead of the defaults), use the `--auth` flag of the `stackql` program.  For example:  
+GoDaddy is retiring the classic key/secret credential (it is deprecated for the Domains APIs and does not work with the Domains v3 API). Where a classic key is still in use, put the pair in a single variable as `key:secret` and pass an `api_key` auth context with the `sso-key` prefix using the `--auth` flag of the `stackql` program:
 
 ```bash
-
-AUTH='{ "godaddy": { "type": "bearer", "credentialsenvvar": "YOUR_GODADDY_API_KEY_VAR" }}'
+export GODADDY_SSO_KEY='<key>:<secret>'
+AUTH='{ "godaddy": { "type": "api_key", "valuePrefix": "sso-key ", "credentialsenvvar": "GODADDY_SSO_KEY" }}'
 stackql shell --auth="${AUTH}"
-
 ```
-or using PowerShell:  
+
+or using PowerShell:
 
 ```powershell
-
-$Auth = "{ 'godaddy': { 'type': 'bearer', 'credentialsenvvar': 'YOUR_GODADDY_API_KEY_VAR' }}"
+$env:GODADDY_SSO_KEY = '<key>:<secret>'
+$Auth = "{ 'godaddy': { 'type': 'api_key', 'valuePrefix': 'sso-key ', 'credentialsenvvar': 'GODADDY_SSO_KEY' }}"
 stackql.exe shell --auth=$Auth
-
 ```
+
+Resources with the `_v3` suffix reject the classic key.
+
 </details>
+
+## API versions and resource naming
+
+GoDaddy publishes three Domains APIs, and this provider exposes all of them side by side. The resource name tells you which one you are using:
+
+| Resource name | API | Notes |
+|---|---|---|
+| bare (`domains`, `records`, `agreements`, ...) | Domains v1 | The original API: full domain detail with contacts, DNS records by type and name, purchase and renewal. Collections are complete (the domain list is paged with a marker cursor automatically). |
+| `_v2` suffix (`domains_v2`, `actions_v2`, `forwards_v2`, ...) | Domains v2 | Customer-scoped and asynchronous: registrant changes, privacy forwarding, pending actions, notifications, forwarding rules, the transfer workflow. Every method takes a <CopyableCode code="customer_id" /> (see below). |
+| `_v3` suffix (`domains_v3`, `records_v3`, `registrations_v3`, ...) | Domains v3 | The newest API (PAT only): record-id based DNS management, the quote-then-register model, HATEOAS pagination followed automatically, asynchronous operations polled through <CopyableCode code="godaddy.domains.operations_v3" />. |
+
+## Customer scope (Domains v2)
+
+The Domains v2 resources address a customer by its UUID (not the numeric shopper number). The customer identifier is a server variable resolved from the <CopyableCode code="GODADDY_CUSTOMER_ID" /> environment variable when it is set, so queries need no `WHERE customer_id` clause:
+
+```bash
+export GODADDY_CUSTOMER_ID='<customer-uuid>'
+```
+
+```sql
+SELECT type, origination, status, created_at
+FROM godaddy.domains.actions_v2
+WHERE domain = 'example.com';
+```
+
+A `WHERE customer_id = '...'` value always takes precedence over the environment, which is how a reseller acts on a subaccount. With the variable unset, `customer_id` is a required parameter on every `_v2` method and `SHOW METHODS` lists it.
+
+## Parameter and column casing
+
+Columns and parameters are snake_case at the SQL surface over GoDaddy's camelCase wire names: `name_servers`, `renew_auto`, `record_id`, `page_size`. Request body fields follow the same rule, so `INSERT` columns and `UPDATE` assignments use snake_case too. Nested JSON values (contacts, prices, links) keep the wire casing inside the blob and are addressed with `json_extract`.
+
+Two v1 query parameters are SQL keywords. Quote them in a `WHERE` clause, or use `LIMIT`, which is pushed down to the API's page-size parameter on the list reads:
+
+```sql
+SELECT domain, status FROM godaddy.domains.domains LIMIT 10;
+SELECT domain FROM godaddy.registration.suggestions WHERE query = 'stackql' LIMIT 5;
+```
+
+## Rate limit
+
+The Domains API allows 60 requests per minute per credential and answers `429 Too Many Requests` with a `Retry-After` header beyond that. Wide queries that fan out across many domains (DNS records for every domain, for example) should be sequenced rather than issued in parallel sessions.
+
+## Domain inventory
+
+Every domain in the account with its lifecycle status and expiry, across all statuses:
+
+```sql
+SELECT domain, status, expires, renew_auto, locked, privacy
+FROM godaddy.domains.domains
+ORDER BY expires;
+```
+
+Only active domains, filtered server-side (`statuses` and `status_groups` are pushed down as query parameters):
+
+```sql
+SELECT domain, expires, name_servers
+FROM godaddy.domains.domains
+WHERE statuses = 'ACTIVE';
+```
+
+Domains expiring within 90 days:
+
+```sql
+SELECT domain, expires, renew_auto
+FROM godaddy.domains.domains
+WHERE statuses = 'ACTIVE'
+AND expires < datetime('now', '+90 days')
+ORDER BY expires;
+```
+
+The same inventory through the v3 API, with lifecycle group filtering and cursor pagination handled for you:
+
+```sql
+SELECT domain, status, expires_at, renew_by, auto_renew, transfer_lock
+FROM godaddy.domains.domains_v3
+WHERE statuses = 'ACTIVE,EXPIRED';
+```
+
+## Domain detail and registrant contacts
+
+```sql
+SELECT domain, status, created_at, expires,
+       json_extract(contact_registrant, '$.nameFirst') AS registrant_first_name,
+       json_extract(contact_registrant, '$.nameLast') AS registrant_last_name,
+       json_extract(contact_registrant, '$.email') AS registrant_email,
+       json_extract(contact_registrant, '$.organization') AS registrant_org
+FROM godaddy.domains.domains
+WHERE domain = 'example.com';
+```
+
+## Nameserver audit
+
+Domains whose nameservers are not GoDaddy's, with the delegation:
+
+```sql
+SELECT domain, name_servers
+FROM godaddy.domains.domains
+WHERE statuses = 'ACTIVE'
+AND name_servers NOT LIKE '%domaincontrol.com%';
+```
+
+## DNS records
+
+All records in a zone (v3, record ids included, paged automatically):
+
+```sql
+SELECT record_id, name, type, data, ttl, priority
+FROM godaddy.dns.records_v3
+WHERE zone = 'example.com';
+```
+
+Records of one type, filtered server-side:
+
+```sql
+SELECT name, data, ttl
+FROM godaddy.dns.records_v3
+WHERE zone = 'example.com' AND type = 'TXT';
+```
+
+The v1 read by type and name:
+
+```sql
+SELECT name, type, data, ttl
+FROM godaddy.dns.records
+WHERE domain = 'example.com' AND type = 'A' AND name = '@';
+```
+
+## Availability and pricing
+
+```sql
+SELECT domain, available, definitive, price, currency, period
+FROM godaddy.registration.availability
+WHERE domain = 'my-next-domain.com';
+```
+
+Price terms through the v3 API (`prices` is a JSON array of term prices):
+
+```sql
+SELECT domain, available, inventory,
+       json_extract(prices, '$[0].price.value') AS first_year_cents,
+       json_extract(prices, '$[0].renewalPrice.value') AS renewal_cents
+FROM godaddy.registration.availability_v3
+WHERE domain = 'my-next-domain.com';
+```
+
+Name suggestions:
+
+```sql
+SELECT domain FROM godaddy.registration.suggestions
+WHERE query = 'stackql' AND tlds = 'com,io' LIMIT 10;
+```
+
+## Provision, mutate and tear down
+
+Mutations use the same SQL grammar: `INSERT` creates a resource, `UPDATE` patches it, `EXEC` invokes lifecycle methods and `DELETE` removes it. A DNS record end to end (v3):
+
+```sql
+-- create
+INSERT INTO godaddy.dns.records_v3 (zone, name, type, data, ttl)
+SELECT 'example.com', 'app', 'A', '203.0.113.10', 3600;
+
+-- find the record id
+SELECT record_id FROM godaddy.dns.records_v3
+WHERE zone = 'example.com' AND type = 'A' AND name = 'app';
+
+-- replace it (PUT: the full record is required)
+UPDATE godaddy.dns.records_v3
+SET name = 'app', type = 'A', data = '203.0.113.11', ttl = 600
+WHERE zone = 'example.com' AND record_id = '<record-id>';
+
+-- remove it
+DELETE FROM godaddy.dns.records_v3
+WHERE zone = 'example.com' AND record_id = '<record-id>';
+```
+
+Bulk record writes through the v1 API take the record array as the `records` attribute:
+
+```sql
+EXEC godaddy.dns.records.add
+  @domain = 'example.com',
+  @records = '[{"type": "TXT", "name": "_verify", "data": "token", "ttl": 600}]';
+
+EXEC godaddy.dns.records.replace_by_type_name
+  @domain = 'example.com', @type = 'A', @name = 'app',
+  @records = '[{"data": "203.0.113.12", "ttl": 600}]';
+```
+
+Domain settings:
+
+```sql
+-- auto-renew and transfer lock
+UPDATE godaddy.domains.domains
+SET renew_auto = 'true', locked = 'true'
+WHERE domain = 'example.com';
+
+-- nameservers through the v3 API (asynchronous - poll the returned operation)
+EXEC godaddy.domains.domains_v3.update_nameservers
+  @domain_name = 'example.com',
+  @idempotency_key = '2f1e0c4e-0d5b-4c6a-9d1e-1c2b3a4d5e6f',
+  @name_servers = '["ns1.example.net", "ns2.example.net"]';
+
+SELECT operation_id, type, status, result
+FROM godaddy.domains.operations_v3
+WHERE operation_id = '<operation-id>';
+```
+
+Registration through the v3 quote-then-register model (`INSERT` returns the quote and registration objects; both are billable operations):
+
+```sql
+INSERT INTO godaddy.registration.registration_quotes_v3 (domain, period)
+SELECT 'my-next-domain.com', 1;
+
+INSERT INTO godaddy.registration.registrations_v3 (quote_token, consent, idempotency_key)
+SELECT '<quote-token>', '{"agreementKeys": ["DNRA"], "agreedAt": "2026-09-16T00:00:00Z", "agreedBy": "203.0.113.5"}', '<uuid>';
+```
+
+Renewal (v1, billable) and the registrant email verification are lifecycle methods on the domain:
+
+```sql
+EXEC godaddy.domains.domains.renew @domain = 'example.com', @period = 1;
+EXEC godaddy.domains.domains.verify_registrant_email @domain = 'example.com';
+```
+
 
 ## Services
 <div class="row">
 <div class="providerDocColumn">
-<a href="/services/abuse/">abuse</a><br />
-<a href="/services/aftermarket/">aftermarket</a><br />
-<a href="/services/agreements/">agreements</a><br />
-<a href="/services/certificates/">certificates</a><br />
-<a href="/services/countries/">countries</a><br />
+<a href="/services/dns/">dns</a><br />
+<a href="/services/domains/">domains</a><br />
 </div>
 <div class="providerDocColumn">
-<a href="/services/domains/">domains</a><br />
-<a href="/services/orders/">orders</a><br />
-<a href="/services/shoppers/">shoppers</a><br />
-<a href="/services/subscriptions/">subscriptions</a><br />
+<a href="/services/registration/">registration</a><br />
+<a href="/services/transfers/">transfers</a><br />
 </div>
 </div>
