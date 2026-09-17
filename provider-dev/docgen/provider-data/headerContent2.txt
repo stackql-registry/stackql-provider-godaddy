@@ -94,7 +94,11 @@ SELECT domain FROM godaddy.registration.suggestions WHERE query = 'stackql' LIMI
 
 The Domains API allows 60 requests per minute per credential and answers `429 Too Many Requests` with a `Retry-After` header beyond that. Wide queries that fan out across many domains (DNS records for every domain, for example) should be sequenced rather than issued in parallel sessions.
 
-## Domain inventory
+## Example Queries
+
+Try the following queries using `stackql shell`, or run them from a script or CI pipeline with `stackql exec`.
+
+### Domain inventory
 
 Every domain in the account with its lifecycle status and expiry, across all statuses:
 
@@ -130,7 +134,7 @@ FROM godaddy.domains.domains_v3
 WHERE statuses = 'ACTIVE,EXPIRED';
 ```
 
-## Domain detail and registrant contacts
+### Domain detail and registrant contacts
 
 ```sql
 SELECT domain, status, created_at, expires,
@@ -142,7 +146,7 @@ FROM godaddy.domains.domains
 WHERE domain = 'example.com';
 ```
 
-## Nameserver audit
+### Nameserver audit
 
 Domains whose nameservers are not GoDaddy's, with the delegation:
 
@@ -153,7 +157,7 @@ WHERE statuses = 'ACTIVE'
 AND name_servers NOT LIKE '%domaincontrol.com%';
 ```
 
-## DNS records
+### DNS records
 
 All records in a zone (v3, record ids included, paged automatically):
 
@@ -179,7 +183,7 @@ FROM godaddy.dns.records
 WHERE domain = 'example.com' AND type = 'A' AND name = '@';
 ```
 
-## Availability and pricing
+### Availability and pricing
 
 ```sql
 SELECT domain, available, definitive, price, currency, period
@@ -204,7 +208,7 @@ SELECT domain FROM godaddy.registration.suggestions
 WHERE query = 'stackql' AND tlds = 'com,io' LIMIT 10;
 ```
 
-## Provision, mutate and tear down
+### Provision, mutate and tear down
 
 Mutations use the same SQL grammar: `INSERT` creates a resource, `UPDATE` patches it, `EXEC` invokes lifecycle methods and `DELETE` removes it. A DNS record end to end (v3):
 
