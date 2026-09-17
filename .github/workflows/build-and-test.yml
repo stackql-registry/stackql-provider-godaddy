@@ -51,12 +51,15 @@ jobs:
       - name: Build provider from the pinned specs
         run: make split mappings normalize generate
 
+      # fetch-spec refreshes the "fetched" date in spec_pin.json on every run,
+      # so the pin is excluded here; pin drift is reported by the step above
+      # and by the spec-drift job.
       - name: Fail on uncommitted generation drift
         run: |
           git add -N .
-          if ! git diff --quiet -- provider-dev/openapi provider-dev/config provider-dev/source; then
+          if ! git diff --quiet -- provider-dev/openapi provider-dev/config provider-dev/source ':(exclude)provider-dev/config/spec_pin.json'; then
             echo "Generated output differs from the committed artifacts - run 'make build' and commit."
-            git diff --stat -- provider-dev/openapi provider-dev/config provider-dev/source
+            git diff --stat -- provider-dev/openapi provider-dev/config provider-dev/source ':(exclude)provider-dev/config/spec_pin.json'
             exit 1
           fi
 
