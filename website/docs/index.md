@@ -25,6 +25,7 @@ Domain registration, domain lifecycle management and DNS from GoDaddy, through t
 
 total services: __4__  
 total resources: __32__  
+source project: __[stackql-provider-godaddy](https://github.com/stackql-registry/stackql-provider-godaddy)__  
 
 :::
 

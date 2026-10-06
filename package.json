@@ -24,7 +24,7 @@
   "dependencies": {
     "@apidevtools/swagger-parser": "^12.1.0",
     "@stackql/pgwire-lite": "^1.0.2",
-    "@stackql/provider-utils": "^0.7.9",
+    "@stackql/provider-utils": "^0.7.12",
     "js-yaml": "^4.1.0",
     "pluralize": "^8.0.0"
   },
