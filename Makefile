@@ -22,6 +22,7 @@ SHELL := bash
 .DEFAULT_GOAL := help
 
 PROVIDER := godaddy
+SOURCE_PROJECT ?= https://github.com/stackql-registry/stackql-provider-$(PROVIDER)
 VERSION := v00.00.00000
 SERVICES_DIR := provider-dev/openapi/src/$(PROVIDER)
 PROVIDER_DIR := $(SERVICES_DIR)/$(VERSION)
@@ -127,7 +128,8 @@ docs: ## generate the website docs (snake_case surface), then sanitize for MDX a
 	  --provider-dir ./$(PROVIDER_DIR) \
 	  --output-dir ./$(WEBSITE_DIR) \
 	  --provider-data-dir ./provider-dev/docgen/provider-data \
-	  --snake-case-aliases
+	  --snake-case-aliases \
+	  --source-project $(SOURCE_PROJECT)
 	node $(WEBSITE_DIR)/scripts/sanitize-docs.mjs
 
 website: ## build the docusaurus microsite (vendors the shared config first)
